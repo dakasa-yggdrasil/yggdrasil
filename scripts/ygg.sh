@@ -11,6 +11,6 @@ fi
 exec docker run --rm -i \
   -v "$ROOT:/workspace" \
   -v "$PARENT:$PARENT" \
-  -w /workspace \
+  -w "$ROOT" \
   golang:1.25-bookworm \
   /usr/local/go/bin/go run ./cmd/ygg "$@"

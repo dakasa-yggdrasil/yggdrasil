@@ -1,0 +1,6 @@
+[submodule "surfaces/yggdrasil-auth-surface"]
+	path = surfaces/yggdrasil-auth-surface
+	url = https://github.com/dakasa-yggdrasil/surface-auth.git
+[submodule "surfaces/yggdrasil-console"]
+	path = surfaces/yggdrasil-console
+	url = https://github.com/dakasa-yggdrasil/surface-console.git

@@ -96,9 +96,19 @@ func (m *Manager) Install(slug string) (Surface, string, error) {
 		return Surface{}, "", err
 	}
 
-	target := filepath.Join(m.root, "surfaces", entry.RepoName)
+	rel := filepath.Join("surfaces", entry.RepoName)
+	target := filepath.Join(m.root, rel)
 	if hasFile(filepath.Join(target, "docker-compose.yml")) {
 		return entry, "installed", nil
+	}
+	if m.isRegisteredSubmodule(rel) {
+		if err := run("git", "-C", m.root, "submodule", "update", "--init", "--recursive", rel); err != nil {
+			return Surface{}, "", err
+		}
+		if err := initEnv(filepath.Join(target, ".env.example"), filepath.Join(target, ".env")); err != nil {
+			return Surface{}, "", err
+		}
+		return entry, "registered", nil
 	}
 	if pathExists(target) {
 		return Surface{}, "", fmt.Errorf("target path already exists and is not a managed surface: %s", target)
@@ -113,12 +123,12 @@ func (m *Manager) Install(slug string) (Surface, string, error) {
 	if sourceLabel == "local" {
 		args = append(args, "-c", "protocol.file.allow=always")
 	}
-	args = append(args, "submodule", "add", source, filepath.Join("surfaces", entry.RepoName))
+	args = append(args, "submodule", "add", source, rel)
 	if err := run("git", args...); err != nil {
 		return Surface{}, "", err
 	}
 
-	if err := run("git", "-C", m.root, "submodule", "update", "--init", "--recursive", filepath.Join("surfaces", entry.RepoName)); err != nil {
+	if err := run("git", "-C", m.root, "submodule", "update", "--init", "--recursive", rel); err != nil {
 		return Surface{}, "", err
 	}
 
@@ -367,6 +377,25 @@ func run(name string, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func (m *Manager) isRegisteredSubmodule(rel string) bool {
+	cmd := exec.Command("git", "-C", m.root, "config", "-f", ".gitmodules", "--get-regexp", `^submodule\..*\.path$`)
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) != 2 {
+			continue
+		}
+		if fields[1] == rel {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) loadActive() ([]string, error) {
