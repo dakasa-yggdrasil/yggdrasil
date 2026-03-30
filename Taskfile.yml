@@ -1,0 +1,136 @@
+version: "3"
+
+vars:
+  PROJECT_NAME: yggdrasil-dev
+
+tasks:
+  doctor:
+    desc: Check whether the local machine has the required tooling for Yggdrasil dev
+    cmds:
+      - |
+        command -v docker >/dev/null 2>&1 || { echo "docker is required"; exit 1; }
+        docker compose version >/dev/null 2>&1 || { echo "docker compose is required"; exit 1; }
+        command -v task >/dev/null 2>&1 || { echo "task is required"; exit 1; }
+
+  arch:check:
+    desc: Verify that the product repo still respects microservice boundaries
+    cmds:
+      - ./scripts/check-boundaries.sh
+
+  env:init:
+    desc: Initialize root and per-service .env files from the examples
+    cmds:
+      - |
+        if [ ! -f ./.env ]; then
+          cp ./.env.example ./.env
+        fi
+      - |
+        find ./services ./surfaces ./integrations -name '.env.example' | sort | while read -r file; do
+          target="${file%.example}"
+          if [ ! -f "$target" ]; then
+            cp "$file" "$target"
+          fi
+        done
+
+  up:
+    desc: Start the full Yggdrasil local stack
+    deps: [env:init]
+    cmds:
+      - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh up -d
+
+  config:
+    desc: Validate and render the full Docker Compose configuration
+    deps: [env:init]
+    cmds:
+      - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh config >/dev/null
+
+  down:
+    desc: Stop the full Yggdrasil local stack
+    deps: [env:init]
+    cmds:
+      - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh down --remove-orphans
+
+  restart:
+    desc: Restart the full Yggdrasil local stack
+    deps: [env:init]
+    cmds:
+      - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh restart
+
+  logs:
+    desc: Follow logs from the full Yggdrasil local stack
+    deps: [env:init]
+    cmds:
+      - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh logs -f
+
+  ps:
+    desc: List containers from the full Yggdrasil local stack
+    deps: [env:init]
+    cmds:
+      - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh ps
+
+  bootstrap:core:
+    desc: Import the bootstrap manifests into yggdrasil-core
+    deps: [up]
+    cmds:
+      - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh exec yggdrasil-core sh -lc "/usr/local/go/bin/go run ./scripts/bootstrap --path ./docs/bootstrap/manifests"
+
+  integrations:list:
+    desc: List installable integrations from the workspace catalog
+    cmds:
+      - ./scripts/ygg.sh integrations list
+
+  surfaces:list:
+    desc: List surfaces currently active in the product runtime
+    cmds:
+      - ./scripts/ygg.sh surfaces list
+
+  surfaces:scaffold:
+    desc: "Scaffold a new surface from the reference template. Usage: task surfaces:scaffold NAME=my-surface [MODULE=github.com/acme/my-surface]"
+    requires:
+      vars: [NAME]
+    cmds:
+      - sh -lc 'if [ -n "{{.MODULE}}" ]; then ./scripts/ygg.sh surfaces scaffold {{.NAME}} {{.MODULE}}; else ./scripts/ygg.sh surfaces scaffold {{.NAME}}; fi'
+
+  surfaces:activate:
+    desc: "Mark one surface as active in the product runtime. Usage: task surfaces:activate NAME=my-surface"
+    requires:
+      vars: [NAME]
+    cmds:
+      - ./scripts/ygg.sh surfaces activate {{.NAME}}
+
+  surfaces:deactivate:
+    desc: "Remove one surface from the active product runtime. Usage: task surfaces:deactivate NAME=old-surface"
+    requires:
+      vars: [NAME]
+    cmds:
+      - ./scripts/ygg.sh surfaces deactivate {{.NAME}}
+
+  integrations:installed:
+    desc: Print docker-compose files for installed integrations
+    cmds:
+      - ./scripts/ygg.sh integrations installed
+
+  integrations:tui:
+    desc: Open the Bubble Tea integration manager
+    cmds:
+      - ./scripts/ygg.sh integrations tui
+
+  integrations:install:
+    desc: "Install an integration as a git submodule. Usage: task integrations:install NAME=rabbitmq"
+    requires:
+      vars: [NAME]
+    cmds:
+      - ./scripts/ygg.sh integrations install {{.NAME}}
+
+  integrations:remove:
+    desc: "Remove an installed integration submodule. Usage: task integrations:remove NAME=rabbitmq"
+    requires:
+      vars: [NAME]
+    cmds:
+      - ./scripts/ygg.sh integrations remove {{.NAME}}
+
+  open:console:
+    desc: Open Yggdrasil Console in the browser
+    deps: [env:init]
+    cmds:
+      - sh -lc '. ./.env && open "http://127.0.0.1:${CONSOLE_PORT:-3080}"'

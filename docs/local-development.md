@@ -1,0 +1,123 @@
+# Local Development
+
+Este workspace foi montado para permitir dois modos de trabalho:
+
+- `full stack`, quando queremos subir o ecossistema inteiro
+- `slice`, quando queremos trabalhar só em um serviço ou plugin, reaproveitando a mesma infra
+
+## Pré-requisitos
+
+- Docker Desktop com `docker compose`
+- [`task`](https://taskfile.dev)
+- Go local é opcional. O installation manager cai para Docker automaticamente quando `go` não estiver instalado.
+
+## Bootstrap inicial
+
+No root do workspace:
+
+```bash
+task doctor
+task arch:check
+task surfaces:list
+task surfaces:scaffold NAME=my-domain-api
+task integrations:list
+task env:init
+task up
+task bootstrap:core
+task open:console
+```
+
+Se quiser instalar integrations de forma interativa:
+
+```bash
+task integrations:tui
+```
+
+## Estrutura de ambiente
+
+- `.env` no root: portas, imagens base, broker e banco compartilhados
+- `services/*/.env`: variáveis específicas dos serviços core
+- `surfaces/*/.env`: variáveis específicas das surfaces
+- `integrations/*/.env`: variáveis específicas de cada plugin
+- o console de referência usa o `yggdrasil-core` HTTP em `http://localhost:9080` por padrão no host
+
+Cada slice carrega:
+
+1. `../../.env`
+2. `./.env`
+
+Com isso, o root define o baseline e o slice só sobrescreve o que precisar.
+
+Os `.env.example` dos slices usam os nomes de variáveis que o próprio Compose consome.
+Isso evita drift entre "arquivo de exemplo" e "ambiente que realmente sobe".
+
+## Fluxo Full Stack
+
+No root:
+
+```bash
+task up
+task logs
+task ps
+task down
+```
+
+`task down` no root derruba o stack inteiro.
+
+## Fluxo por Slice
+
+Exemplos:
+
+```bash
+cd services/yggdrasil-core && task up
+cd surfaces/yggdrasil-auth-surface && task up
+cd surfaces/yggdrasil-console && task up
+```
+
+Depois de instalar uma integration:
+
+```bash
+cd integrations/yggdrasil-integration-github && task up
+```
+
+Boas práticas do comportamento local:
+
+- `task up` sobe só o serviço do slice e as dependências declaradas dele
+- `task down` para só o serviço do slice
+- `task restart` reinicia só o serviço do slice
+- `task config` valida a composição daquele slice
+
+Isso evita um problema comum em monorepos Docker: um serviço parar toda a infra compartilhada sem querer.
+
+## Convenções adotadas
+
+- infraestrutura comum em `dev/compose/infra.yml`
+- banco e broker compartilhados pelo mesmo `COMPOSE_PROJECT_NAME`
+- `docker-compose.yml` em cada slice
+- `Taskfile.yml` em cada slice
+- `Taskfile.yml` no root para orquestração do stack completo
+- `services/` reservado para o coração do produto
+- `surfaces/` reservado para APIs, auth, UIs e bordas substituíveis
+- as surfaces ativas do runtime ficam em `catalog/surfaces.active`
+- as surfaces de referência ativas hoje são `yggdrasil-auth-surface` e `yggdrasil-console`
+- integrations instaladas como `git submodule`
+- compose do root descobrindo automaticamente integrations instaladas
+- compose do root carregando apenas as surfaces marcadas como ativas
+- template de surface disponível via `task surfaces:scaffold`
+
+## Banco local
+
+O Postgres compartilhado cria:
+
+- banco padrão compartilhado do workspace
+- `yggdrasil_core`
+
+## Dicas operacionais
+
+- use `task config` antes do primeiro `task up` de um slice se estiver ajustando compose
+- use `task arch:check` quando mexer em fronteiras entre serviços
+- use `task bootstrap:core` depois do primeiro `task up` completo para carregar manifests bootstrap
+- use `task integrations:list` para ver o catálogo disponível
+- use `task surfaces:scaffold NAME=<slug>` para criar uma nova surface de referência a partir do template
+- use `task integrations:install NAME=<slug>` para instalar uma integration específica
+- se precisar resetar tudo, faça isso no root com `task down` e depois remova volumes manualmente no Docker Desktop

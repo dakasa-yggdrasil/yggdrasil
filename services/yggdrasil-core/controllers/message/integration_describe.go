@@ -1,0 +1,460 @@
+package message
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	manifestengine "github.com/dakasa-co/yggdrasil-core/manifest"
+	"github.com/dakasa-co/yggdrasil-core/model"
+	"github.com/dakasa-co/yggdrasil-core/repository"
+	amqp "github.com/rabbitmq/amqp091-go"
+)
+
+const integrationDescribeCacheTTL = 30 * time.Second
+
+var (
+	integrationDescribeContract = rpcContractSpec{
+		Family:      "integration-adapter/v1",
+		RequestDef:  "adapterDescribeRequest",
+		ResponseDef: "adapterDescribeResponse",
+		Label:       "integration describe",
+	}
+
+	integrationDescribeCacheMu sync.RWMutex
+	integrationDescribeCache   = map[string]time.Time{}
+)
+
+func verifyResolvedIntegrationType(
+	ctx context.Context,
+	conn *amqp.Connection,
+	db *sql.DB,
+	typeManifest model.Manifest,
+	typeSpec model.IntegrationTypeManifestSpec,
+) error {
+	queue := strings.TrimSpace(typeSpec.Adapter.Queues.Describe)
+	stateDetails := integrationDescribeStateDetails(typeManifest, typeSpec, queue)
+
+	if db == nil {
+		return fmt.Errorf("database connection is required to verify integration describe handshake")
+	}
+
+	if conn == nil {
+		err := fmt.Errorf("rabbitmq connection is required to verify integration describe handshake")
+		return failIntegrationDescribeHandshake(ctx, db, typeManifest, model.IntegrationRuntimeStatusUnreachable, err, stateDetails)
+	}
+
+	if queue == "" {
+		err := fmt.Errorf(
+			"integration type %s/%s has no describe queue",
+			typeManifest.Metadata.Namespace,
+			typeManifest.Metadata.Name,
+		)
+		return failIntegrationDescribeHandshake(ctx, db, typeManifest, model.IntegrationRuntimeStatusContractMismatch, err, stateDetails)
+	}
+
+	cacheKey := integrationDescribeCacheKey(typeManifest, typeSpec)
+	if integrationDescribeRecentlyVerified(cacheKey) {
+		return nil
+	}
+
+	timeout := time.Duration(typeSpec.Adapter.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+
+	rpcCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	request := model.AdapterDescribeRequest{
+		Provider:        strings.TrimSpace(typeSpec.Provider),
+		ExpectedVersion: strings.TrimSpace(typeSpec.Adapter.Version),
+	}
+
+	var response model.AdapterDescribeResponse
+	if err := callContractRPC(rpcCtx, conn, queue, integrationDescribeContract, request, &response); err != nil {
+		wrappedErr := fmt.Errorf(
+			"describe integration type %s/%s through queue %q: %w",
+			typeManifest.Metadata.Namespace,
+			typeManifest.Metadata.Name,
+			queue,
+			err,
+		)
+		details := cloneAuthorizationInput(stateDetails)
+		if liveDetails := integrationDescribeLiveDetails(response); len(liveDetails) > 0 {
+			details["live_contract"] = liveDetails
+		}
+		return failIntegrationDescribeHandshake(
+			ctx,
+			db,
+			typeManifest,
+			integrationDescribeFailureStatus(wrappedErr),
+			wrappedErr,
+			details,
+		)
+	}
+
+	liveSpec := integrationTypeSpecFromDescribeResponse(response)
+	if liveDetails := integrationDescribeLiveDetails(response); len(liveDetails) > 0 {
+		stateDetails["live_contract"] = liveDetails
+	}
+	if err := manifestengine.ValidateIntegrationTypeSpec(liveSpec); err != nil {
+		wrappedErr := fmt.Errorf(
+			"live describe contract for integration type %s/%s is invalid: %w",
+			typeManifest.Metadata.Namespace,
+			typeManifest.Metadata.Name,
+			err,
+		)
+		return failIntegrationDescribeHandshake(ctx, db, typeManifest, model.IntegrationRuntimeStatusInvalidResponse, wrappedErr, stateDetails)
+	}
+
+	if err := compareIntegrationTypeSpec(typeSpec, liveSpec); err != nil {
+		wrappedErr := fmt.Errorf(
+			"integration type %s/%s does not match live adapter describe contract: %w",
+			typeManifest.Metadata.Namespace,
+			typeManifest.Metadata.Name,
+			err,
+		)
+		return failIntegrationDescribeHandshake(ctx, db, typeManifest, model.IntegrationRuntimeStatusContractMismatch, wrappedErr, stateDetails)
+	}
+
+	if _, err := repository.UpsertIntegrationRuntimeState(
+		ctx,
+		db,
+		typeManifest,
+		model.IntegrationRuntimeCheckKindDescribeHandshake,
+		model.IntegrationRuntimeStatusHealthy,
+		fmt.Sprintf(
+			"describe handshake healthy for %s/%s",
+			typeManifest.Metadata.Namespace,
+			typeManifest.Metadata.Name,
+		),
+		stateDetails,
+	); err != nil {
+		return fmt.Errorf(
+			"record describe handshake state for integration type %s/%s: %w",
+			typeManifest.Metadata.Namespace,
+			typeManifest.Metadata.Name,
+			err,
+		)
+	}
+
+	markIntegrationDescribeVerified(cacheKey)
+	return nil
+}
+
+func integrationDescribeStateDetails(
+	typeManifest model.Manifest,
+	typeSpec model.IntegrationTypeManifestSpec,
+	queue string,
+) map[string]any {
+	return map[string]any{
+		"integration_type": manifestReferenceFromRecord(typeManifest),
+		"provider":         strings.TrimSpace(typeSpec.Provider),
+		"adapter_version":  strings.TrimSpace(typeSpec.Adapter.Version),
+		"queue":            strings.TrimSpace(queue),
+		"transport":        strings.TrimSpace(typeSpec.Adapter.Transport),
+	}
+}
+
+func integrationDescribeLiveDetails(response model.AdapterDescribeResponse) map[string]any {
+	if strings.TrimSpace(response.Provider) == "" &&
+		strings.TrimSpace(response.Adapter.Version) == "" &&
+		len(response.Capabilities) == 0 &&
+		len(response.ResourceTypes) == 0 &&
+		len(response.ActionCatalog) == 0 {
+		return nil
+	}
+
+	liveSpec := normalizeIntegrationTypeSpecForComparison(integrationTypeSpecFromDescribeResponse(response))
+	return map[string]any{
+		"provider":          liveSpec.Provider,
+		"adapter":           liveSpec.Adapter,
+		"capabilities":      liveSpec.Capabilities,
+		"credential_schema": liveSpec.CredentialSchema,
+		"instance_schema":   liveSpec.InstanceSchema,
+		"resource_types":    liveSpec.ResourceTypes,
+		"action_catalog":    liveSpec.ActionCatalog,
+		"discovery":         liveSpec.Discovery,
+		"normalization":     liveSpec.Normalization,
+		"execution":         liveSpec.Execution,
+		"extensions":        liveSpec.Extensions,
+	}
+}
+
+func integrationDescribeFailureStatus(err error) string {
+	if err == nil {
+		return model.IntegrationRuntimeStatusUnreachable
+	}
+
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(message, "validate integration describe response"),
+		strings.Contains(message, "live describe contract"):
+		return model.IntegrationRuntimeStatusInvalidResponse
+	case strings.Contains(message, "does not match live adapter describe contract"),
+		strings.Contains(message, "has no describe queue"),
+		strings.Contains(message, "validate integration describe request"):
+		return model.IntegrationRuntimeStatusContractMismatch
+	default:
+		return model.IntegrationRuntimeStatusUnreachable
+	}
+}
+
+func failIntegrationDescribeHandshake(
+	ctx context.Context,
+	db *sql.DB,
+	typeManifest model.Manifest,
+	status string,
+	cause error,
+	details map[string]any,
+) error {
+	if cause == nil {
+		return nil
+	}
+
+	if db == nil {
+		return cause
+	}
+
+	recordedDetails := cloneAuthorizationInput(details)
+	recordedDetails["error"] = cause.Error()
+	if _, err := repository.UpsertIntegrationRuntimeState(
+		ctx,
+		db,
+		typeManifest,
+		model.IntegrationRuntimeCheckKindDescribeHandshake,
+		status,
+		cause.Error(),
+		recordedDetails,
+	); err != nil {
+		return fmt.Errorf(
+			"%w (also failed to record integration runtime state: %v)",
+			cause,
+			err,
+		)
+	}
+
+	return cause
+}
+
+func integrationTypeSpecFromDescribeResponse(response model.AdapterDescribeResponse) model.IntegrationTypeManifestSpec {
+	return model.IntegrationTypeManifestSpec{
+		Provider:         response.Provider,
+		Adapter:          response.Adapter,
+		Capabilities:     response.Capabilities,
+		CredentialSchema: response.CredentialSchema,
+		InstanceSchema:   response.InstanceSchema,
+		ResourceTypes:    response.ResourceTypes,
+		ActionCatalog:    response.ActionCatalog,
+		Discovery:        response.Discovery,
+		Normalization:    response.Normalization,
+		Execution:        response.Execution,
+		Extensions:       response.Extensions,
+	}
+}
+
+func compareIntegrationTypeSpec(expected model.IntegrationTypeManifestSpec, actual model.IntegrationTypeManifestSpec) error {
+	expected = normalizeIntegrationTypeSpecForComparison(expected)
+	actual = normalizeIntegrationTypeSpecForComparison(actual)
+
+	if expected.Provider != actual.Provider {
+		return fmt.Errorf("provider mismatch: expected %q, got %q", expected.Provider, actual.Provider)
+	}
+	if !reflect.DeepEqual(expected.Adapter, actual.Adapter) {
+		return formatContractMismatch("adapter", expected.Adapter, actual.Adapter)
+	}
+	if !reflect.DeepEqual(expected.Capabilities, actual.Capabilities) {
+		return formatContractMismatch("capabilities", expected.Capabilities, actual.Capabilities)
+	}
+	if !reflect.DeepEqual(expected.CredentialSchema, actual.CredentialSchema) {
+		return formatContractMismatch("credential_schema", expected.CredentialSchema, actual.CredentialSchema)
+	}
+	if !reflect.DeepEqual(expected.InstanceSchema, actual.InstanceSchema) {
+		return formatContractMismatch("instance_schema", expected.InstanceSchema, actual.InstanceSchema)
+	}
+	if !reflect.DeepEqual(expected.ResourceTypes, actual.ResourceTypes) {
+		return formatContractMismatch("resource_types", expected.ResourceTypes, actual.ResourceTypes)
+	}
+	if !reflect.DeepEqual(expected.ActionCatalog, actual.ActionCatalog) {
+		return formatContractMismatch("action_catalog", expected.ActionCatalog, actual.ActionCatalog)
+	}
+	if !reflect.DeepEqual(expected.Discovery, actual.Discovery) {
+		return formatContractMismatch("discovery", expected.Discovery, actual.Discovery)
+	}
+	if !reflect.DeepEqual(expected.Normalization, actual.Normalization) {
+		return formatContractMismatch("normalization", expected.Normalization, actual.Normalization)
+	}
+	if !reflect.DeepEqual(expected.Execution, actual.Execution) {
+		return formatContractMismatch("execution", expected.Execution, actual.Execution)
+	}
+	if !reflect.DeepEqual(expected.Extensions, actual.Extensions) {
+		return formatContractMismatch("extensions", expected.Extensions, actual.Extensions)
+	}
+
+	return nil
+}
+
+func normalizeIntegrationTypeSpecForComparison(spec model.IntegrationTypeManifestSpec) model.IntegrationTypeManifestSpec {
+	spec.Provider = normalizeIntegrationToken(spec.Provider)
+	spec.Adapter = normalizeIntegrationAdapterSpec(spec.Adapter)
+	spec.Capabilities = normalizeIntegrationTokens(spec.Capabilities)
+	spec.CredentialSchema = normalizeIntegrationSchemaSpec(spec.CredentialSchema)
+	spec.InstanceSchema = normalizeIntegrationSchemaSpec(spec.InstanceSchema)
+	spec.ResourceTypes = normalizeIntegrationResourceTypes(spec.ResourceTypes)
+	spec.ActionCatalog = normalizeIntegrationActionCatalog(spec.ActionCatalog)
+	spec.Discovery = model.IntegrationDiscoverySpec{
+		Mode:             normalizeIntegrationToken(spec.Discovery.Mode),
+		Cursor:           normalizeIntegrationToken(spec.Discovery.Cursor),
+		SupportsWebhooks: spec.Discovery.SupportsWebhooks,
+	}
+	spec.Normalization = model.IntegrationNormalizationSpec{
+		ExternalIDPath:         strings.TrimSpace(spec.Normalization.ExternalIDPath),
+		NamePath:               strings.TrimSpace(spec.Normalization.NamePath),
+		OwnerPath:              strings.TrimSpace(spec.Normalization.OwnerPath),
+		FallbackResourcePrefix: strings.TrimSpace(spec.Normalization.FallbackResourcePrefix),
+	}
+	spec.Execution = model.IntegrationExecutionSpec{
+		SupportsDryRun:    spec.Execution.SupportsDryRun,
+		IdempotentActions: normalizeIntegrationTokens(spec.Execution.IdempotentActions),
+	}
+	return spec
+}
+
+func normalizeIntegrationAdapterSpec(spec model.IntegrationAdapterSpec) model.IntegrationAdapterSpec {
+	return model.IntegrationAdapterSpec{
+		Transport: normalizeIntegrationToken(spec.Transport),
+		Version:   strings.TrimSpace(spec.Version),
+		Queues: model.IntegrationAdapterQueue{
+			Describe: strings.TrimSpace(spec.Queues.Describe),
+			Discover: strings.TrimSpace(spec.Queues.Discover),
+			Read:     strings.TrimSpace(spec.Queues.Read),
+			Execute:  strings.TrimSpace(spec.Queues.Execute),
+			Sync:     strings.TrimSpace(spec.Queues.Sync),
+			Health:   strings.TrimSpace(spec.Queues.Health),
+		},
+		TimeoutSeconds: spec.TimeoutSeconds,
+	}
+}
+
+func normalizeIntegrationSchemaSpec(spec model.IntegrationSchemaSpec) model.IntegrationSchemaSpec {
+	spec.Mode = normalizeIntegrationToken(spec.Mode)
+	spec.Required = normalizeIntegrationTokens(spec.Required)
+
+	if len(spec.Properties) == 0 {
+		return spec
+	}
+
+	properties := make(map[string]model.IntegrationSchemaProperty, len(spec.Properties))
+	for name, property := range spec.Properties {
+		properties[normalizeIntegrationToken(name)] = model.IntegrationSchemaProperty{
+			Type:        normalizeIntegrationToken(property.Type),
+			Description: strings.TrimSpace(property.Description),
+			Secret:      property.Secret,
+			Enum:        property.Enum,
+			Default:     property.Default,
+		}
+	}
+	spec.Properties = properties
+	return spec
+}
+
+func normalizeIntegrationResourceTypes(resourceTypes []model.IntegrationResourceType) []model.IntegrationResourceType {
+	if len(resourceTypes) == 0 {
+		return nil
+	}
+
+	normalized := make([]model.IntegrationResourceType, 0, len(resourceTypes))
+	for _, resourceType := range resourceTypes {
+		normalized = append(normalized, model.IntegrationResourceType{
+			Name:             normalizeIntegrationToken(resourceType.Name),
+			CanonicalPrefix:  strings.TrimSpace(resourceType.CanonicalPrefix),
+			IdentityTemplate: strings.TrimSpace(resourceType.IdentityTemplate),
+			Discoverable:     resourceType.Discoverable,
+			DefaultActions:   normalizeIntegrationTokens(resourceType.DefaultActions),
+		})
+	}
+
+	slices.SortFunc(normalized, func(a model.IntegrationResourceType, b model.IntegrationResourceType) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return normalized
+}
+
+func normalizeIntegrationActionCatalog(actions []model.IntegrationActionDefinition) []model.IntegrationActionDefinition {
+	if len(actions) == 0 {
+		return nil
+	}
+
+	normalized := make([]model.IntegrationActionDefinition, 0, len(actions))
+	for _, action := range actions {
+		normalized = append(normalized, model.IntegrationActionDefinition{
+			Name:          normalizeIntegrationToken(action.Name),
+			Description:   strings.TrimSpace(action.Description),
+			ResourceTypes: normalizeIntegrationTokens(action.ResourceTypes),
+			Idempotent:    action.Idempotent,
+		})
+	}
+
+	slices.SortFunc(normalized, func(a model.IntegrationActionDefinition, b model.IntegrationActionDefinition) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return normalized
+}
+
+func normalizeIntegrationTokens(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		token := normalizeIntegrationToken(value)
+		if token != "" {
+			normalized = append(normalized, token)
+		}
+	}
+	slices.Sort(normalized)
+	return normalized
+}
+
+func normalizeIntegrationToken(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func formatContractMismatch(label string, expected any, actual any) error {
+	expectedJSON, _ := json.Marshal(expected)
+	actualJSON, _ := json.Marshal(actual)
+	return fmt.Errorf("%s mismatch: expected %s, got %s", label, expectedJSON, actualJSON)
+}
+
+func integrationDescribeCacheKey(typeManifest model.Manifest, typeSpec model.IntegrationTypeManifestSpec) string {
+	return strings.Join([]string{
+		typeManifest.ID.String(),
+		typeManifest.Checksum,
+		strings.TrimSpace(typeSpec.Adapter.Version),
+		strings.TrimSpace(typeSpec.Adapter.Queues.Describe),
+	}, ":")
+}
+
+func integrationDescribeRecentlyVerified(cacheKey string) bool {
+	integrationDescribeCacheMu.RLock()
+	verifiedAt, ok := integrationDescribeCache[cacheKey]
+	integrationDescribeCacheMu.RUnlock()
+	if !ok {
+		return false
+	}
+	return time.Since(verifiedAt) < integrationDescribeCacheTTL
+}
+
+func markIntegrationDescribeVerified(cacheKey string) {
+	integrationDescribeCacheMu.Lock()
+	integrationDescribeCache[cacheKey] = time.Now().UTC()
+	integrationDescribeCacheMu.Unlock()
+}

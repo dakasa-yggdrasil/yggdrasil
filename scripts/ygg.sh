@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PARENT="$(dirname "$ROOT")"
+
+if command -v go >/dev/null 2>&1; then
+  exec go run ./cmd/ygg "$@"
+fi
+
+exec docker run --rm -i \
+  -v "$ROOT:/workspace" \
+  -v "$PARENT:$PARENT" \
+  -w /workspace \
+  golang:1.25-bookworm \
+  /usr/local/go/bin/go run ./cmd/ygg "$@"

@@ -1,0 +1,44 @@
+services:
+  yggdrasil-postgres:
+    image: ${POSTGRES_IMAGE}
+    container_name: yggdrasil-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_CORE_DB: ${POSTGRES_CORE_DB}
+    ports:
+      - "${POSTGRES_HOST_PORT}:5432"
+    volumes:
+      - yggdrasil-postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  yggdrasil-rabbitmq:
+    image: ${RABBITMQ_IMAGE}
+    container_name: yggdrasil-rabbitmq
+    user: "0:0"
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - |
+        chown -R rabbitmq:rabbitmq /var/lib/rabbitmq || true
+        exec docker-entrypoint.sh rabbitmq-server
+    ports:
+      - "${RABBITMQ_HOST_PORT}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT}:15672"
+    volumes:
+      - yggdrasil-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  yggdrasil-postgres-data:
+  yggdrasil-rabbitmq-data:

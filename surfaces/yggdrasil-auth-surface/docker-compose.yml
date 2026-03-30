@@ -1,0 +1,22 @@
+services:
+  yggdrasil-auth-surface:
+    image: ${GO_IMAGE}
+    working_dir: /workspace
+    command: sh -lc "/usr/local/go/bin/go run ."
+    environment:
+      PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PORT: ${AUTH_SURFACE_PORT:-9090}
+      YGGDRASIL_CORE_HTTP_URL: ${YGGDRASIL_CORE_HTTP_URL:-http://yggdrasil-core:9080}
+    ports:
+      - "${AUTH_SURFACE_PORT:-9090}:${AUTH_SURFACE_PORT:-9090}"
+    volumes:
+      - ../../surfaces/yggdrasil-auth-surface:/workspace
+      - yggdrasil-auth-surface-go-mod:/go/pkg/mod
+      - yggdrasil-auth-surface-go-build:/root/.cache/go-build
+    depends_on:
+      yggdrasil-core:
+        condition: service_started
+
+volumes:
+  yggdrasil-auth-surface-go-mod:
+  yggdrasil-auth-surface-go-build:

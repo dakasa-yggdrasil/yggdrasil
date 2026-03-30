@@ -1,0 +1,68 @@
+{
+  "version": "v1",
+  "integrations": [
+    {
+      "slug": "github",
+      "repo_name": "yggdrasil-integration-github",
+      "display_name": "GitHub",
+      "domain": "github",
+      "section": "operations",
+      "repo_url": "https://github.com/dakasa-yggdrasil/yggdrasil-integration-github.git",
+      "description": "Operations plugin for repositories, environments, teams and workflow dispatch."
+    },
+    {
+      "slug": "gcp",
+      "repo_name": "yggdrasil-integration-gcp",
+      "display_name": "GCP",
+      "domain": "gcp",
+      "section": "operations",
+      "repo_url": "https://github.com/dakasa-yggdrasil/yggdrasil-integration-gcp.git",
+      "description": "Operations plugin for Google Cloud provisioning and ecosystem automation."
+    },
+    {
+      "slug": "kubernetes",
+      "repo_name": "yggdrasil-integration-kubernetes",
+      "display_name": "Kubernetes",
+      "domain": "kubernetes",
+      "section": "operations",
+      "repo_url": "https://github.com/dakasa-yggdrasil/yggdrasil-integration-kubernetes.git",
+      "description": "Target-side plugin for declarative apply and observation on Kubernetes clusters."
+    },
+    {
+      "slug": "rabbitmq",
+      "repo_name": "yggdrasil-integration-rabbitmq",
+      "display_name": "RabbitMQ",
+      "domain": "rabbitmq",
+      "section": "operations",
+      "repo_url": "https://github.com/dakasa-yggdrasil/yggdrasil-integration-rabbitmq.git",
+      "description": "Runtime and governance plugin for RabbitMQ resources and operations."
+    },
+    {
+      "slug": "rabbitmq-on-kubernetes",
+      "repo_name": "yggdrasil-integration-rabbitmq-on-kubernetes",
+      "display_name": "RabbitMQ on Kubernetes",
+      "domain": "rabbitmq",
+      "section": "installations",
+      "repo_url": "https://github.com/dakasa-yggdrasil/yggdrasil-integration-rabbitmq-on-kubernetes.git",
+      "description": "Installation plugin for RabbitMQ on Kubernetes."
+    },
+    {
+      "slug": "grafana",
+      "repo_name": "yggdrasil-integration-grafana",
+      "display_name": "Grafana",
+      "domain": "grafana",
+      "section": "operations",
+      "repo_url": "https://github.com/dakasa-yggdrasil/yggdrasil-integration-grafana.git",
+      "description": "Runtime and governance plugin for Grafana dashboards, datasources and alerting."
+    },
+    {
+      "slug": "grafana-on-kubernetes",
+      "repo_name": "yggdrasil-integration-grafana-on-kubernetes",
+      "display_name": "Grafana on Kubernetes",
+      "domain": "grafana",
+      "section": "installations",
+      "repo_url": "https://github.com/dakasa-yggdrasil/yggdrasil-integration-grafana-on-kubernetes.git",
+      "description": "Installation plugin for Grafana on Kubernetes."
+    }
+  ]
+}

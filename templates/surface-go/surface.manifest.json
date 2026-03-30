@@ -1,0 +1,42 @@
+{
+  "apiVersion": "yggdrasil.io/v1alpha1",
+  "kind": "surface",
+  "metadata": {
+    "name": "__SURFACE_NAME__",
+    "namespace": "global",
+    "description": "__SURFACE_DISPLAY_NAME__ custom surface",
+    "labels": {
+      "yggdrasil.io/surface-category": "api",
+      "yggdrasil.io/surface-reference": "false"
+    }
+  },
+  "spec": {
+    "category": "api",
+    "owners": ["team:platform"],
+    "replaces": ["api"],
+    "integration_binding": "core_only",
+    "runtime": {
+      "kind": "http_api",
+      "exposure": "internal",
+      "port": __SURFACE_PORT__,
+      "base_path": "/",
+      "health_path": "/healthz"
+    },
+    "core_contracts": [
+      "authorization",
+      "workflow",
+      "product",
+      "integration_catalog",
+      "surface"
+    ],
+    "capabilities": [
+      {
+        "name": "__SURFACE_NAME__-root",
+        "kind": "endpoint",
+        "audience": "internal",
+        "path": "/",
+        "methods": ["GET"]
+      }
+    ]
+  }
+}

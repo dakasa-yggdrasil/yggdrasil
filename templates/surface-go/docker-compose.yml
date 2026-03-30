@@ -1,0 +1,22 @@
+services:
+  __SURFACE_NAME__:
+    image: ${GO_IMAGE}
+    working_dir: /workspace
+    command: sh -lc "/usr/local/go/bin/go run ."
+    environment:
+      PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PORT: ${SURFACE_PORT}
+      YGGDRASIL_CORE_HTTP_URL: ${YGGDRASIL_CORE_HTTP_URL}
+    ports:
+      - "${SURFACE_PORT}:${SURFACE_PORT}"
+    volumes:
+      - ../../surfaces/__SURFACE_NAME__:/workspace
+      - __SURFACE_NAME__-go-mod:/go/pkg/mod
+      - __SURFACE_NAME__-go-build:/root/.cache/go-build
+    depends_on:
+      yggdrasil-core:
+        condition: service_started
+
+volumes:
+  __SURFACE_NAME__-go-mod:
+  __SURFACE_NAME__-go-build:
