@@ -249,19 +249,7 @@ func executeIntegrationThroughResolved(
 	typeSpec model.IntegrationTypeManifestSpec,
 	timeoutOverride time.Duration,
 ) (model.ExecuteIntegrationResponse, error) {
-	queue := strings.TrimSpace(typeSpec.Adapter.Queues.Execute)
-	if queue == "" {
-		return model.ExecuteIntegrationResponse{}, fmt.Errorf(
-			"integration type %s/%s has no execute queue",
-			typeManifest.Metadata.Namespace,
-			typeManifest.Metadata.Name,
-		)
-	}
-
 	timeout := defaultWorkflowStepTimeout
-	if configured := strings.TrimSpace(typeSpec.Adapter.Transport); configured != "" && configured != "rabbitmq" {
-		return model.ExecuteIntegrationResponse{}, fmt.Errorf("integration type transport %q is unsupported for execute", configured)
-	}
 	if typeSpec.Adapter.TimeoutSeconds > 0 {
 		timeout = time.Duration(typeSpec.Adapter.TimeoutSeconds) * time.Second
 	}
@@ -287,8 +275,9 @@ func executeIntegrationThroughResolved(
 	}
 
 	var response model.AdapterExecuteIntegrationResponse
-	if err := callContractRPC(rpcCtx, conn, queue, integrationExecuteContract, request, &response); err != nil {
-		return model.ExecuteIntegrationResponse{}, fmt.Errorf("call integration execute queue %q: %w", queue, err)
+	transport := NewAdapterTransportClient(conn)
+	if err := transport.Call(rpcCtx, integrationExecuteContract, typeSpec, instanceSpec, "execute", request, &response); err != nil {
+		return model.ExecuteIntegrationResponse{}, fmt.Errorf("call integration execute transport %q: %w", typeSpec.Adapter.Transport, err)
 	}
 
 	if operation := strings.TrimSpace(response.Operation); operation != "" && operation != req.Operation {

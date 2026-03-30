@@ -383,6 +383,7 @@ func buildCatalogDiscoveryItem(
 		Repository:         strings.TrimSpace(candidate.Repository),
 		Labels:             cloneStringMap(candidate.Labels),
 		Metadata:           cloneAuthorizationInput(candidate.Metadata),
+		Registration:       candidate.Registration,
 		RegistrationStatus: model.CatalogDiscoveryRegistrationMissing,
 	}
 

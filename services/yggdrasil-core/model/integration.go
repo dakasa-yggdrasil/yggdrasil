@@ -20,11 +20,22 @@ type IntegrationAdapterSpec struct {
 	Transport      string                  `json:"transport"`
 	Version        string                  `json:"version"`
 	Queues         IntegrationAdapterQueue `json:"queues"`
+	Endpoints      IntegrationAdapterRoute `json:"endpoints,omitempty"`
 	TimeoutSeconds int                     `json:"timeout_seconds,omitempty"`
 }
 
 // IntegrationAdapterQueue enumerates the queue names one adapter can implement.
 type IntegrationAdapterQueue struct {
+	Describe string `json:"describe,omitempty"`
+	Discover string `json:"discover,omitempty"`
+	Read     string `json:"read,omitempty"`
+	Execute  string `json:"execute,omitempty"`
+	Sync     string `json:"sync,omitempty"`
+	Health   string `json:"health,omitempty"`
+}
+
+// IntegrationAdapterRoute enumerates the HTTP endpoints one adapter can expose.
+type IntegrationAdapterRoute struct {
 	Describe string `json:"describe,omitempty"`
 	Discover string `json:"discover,omitempty"`
 	Read     string `json:"read,omitempty"`

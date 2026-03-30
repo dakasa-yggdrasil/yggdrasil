@@ -36,23 +36,20 @@ func verifyResolvedIntegrationType(
 	conn *amqp.Connection,
 	db *sql.DB,
 	typeManifest model.Manifest,
+	instanceSpec model.IntegrationInstanceManifestSpec,
 	typeSpec model.IntegrationTypeManifestSpec,
 ) error {
-	queue := strings.TrimSpace(typeSpec.Adapter.Queues.Describe)
-	stateDetails := integrationDescribeStateDetails(typeManifest, typeSpec, queue)
+	channel := adapterQueueForCapability(typeSpec.Adapter.Queues, "describe")
+	endpoint := adapterEndpointForCapability(typeSpec.Adapter.Endpoints, "describe")
+	stateDetails := integrationDescribeStateDetails(typeManifest, typeSpec, channel, endpoint)
 
 	if db == nil {
 		return fmt.Errorf("database connection is required to verify integration describe handshake")
 	}
 
-	if conn == nil {
-		err := fmt.Errorf("rabbitmq connection is required to verify integration describe handshake")
-		return failIntegrationDescribeHandshake(ctx, db, typeManifest, model.IntegrationRuntimeStatusUnreachable, err, stateDetails)
-	}
-
-	if queue == "" {
+	if channel == "" && endpoint == "" {
 		err := fmt.Errorf(
-			"integration type %s/%s has no describe queue",
+			"integration type %s/%s has no describe route",
 			typeManifest.Metadata.Namespace,
 			typeManifest.Metadata.Name,
 		)
@@ -78,12 +75,13 @@ func verifyResolvedIntegrationType(
 	}
 
 	var response model.AdapterDescribeResponse
-	if err := callContractRPC(rpcCtx, conn, queue, integrationDescribeContract, request, &response); err != nil {
+	transport := NewAdapterTransportClient(conn)
+	if err := transport.Call(rpcCtx, integrationDescribeContract, typeSpec, instanceSpec, "describe", request, &response); err != nil {
 		wrappedErr := fmt.Errorf(
-			"describe integration type %s/%s through queue %q: %w",
+			"describe integration type %s/%s through transport %q: %w",
 			typeManifest.Metadata.Namespace,
 			typeManifest.Metadata.Name,
-			queue,
+			typeSpec.Adapter.Transport,
 			err,
 		)
 		details := cloneAuthorizationInput(stateDetails)
@@ -153,12 +151,14 @@ func integrationDescribeStateDetails(
 	typeManifest model.Manifest,
 	typeSpec model.IntegrationTypeManifestSpec,
 	queue string,
+	endpoint string,
 ) map[string]any {
 	return map[string]any{
 		"integration_type": manifestReferenceFromRecord(typeManifest),
 		"provider":         strings.TrimSpace(typeSpec.Provider),
 		"adapter_version":  strings.TrimSpace(typeSpec.Adapter.Version),
 		"queue":            strings.TrimSpace(queue),
+		"endpoint":         strings.TrimSpace(endpoint),
 		"transport":        strings.TrimSpace(typeSpec.Adapter.Transport),
 	}
 }
@@ -199,7 +199,7 @@ func integrationDescribeFailureStatus(err error) string {
 		strings.Contains(message, "live describe contract"):
 		return model.IntegrationRuntimeStatusInvalidResponse
 	case strings.Contains(message, "does not match live adapter describe contract"),
-		strings.Contains(message, "has no describe queue"),
+		strings.Contains(message, "has no describe route"),
 		strings.Contains(message, "validate integration describe request"):
 		return model.IntegrationRuntimeStatusContractMismatch
 	default:
@@ -339,6 +339,14 @@ func normalizeIntegrationAdapterSpec(spec model.IntegrationAdapterSpec) model.In
 			Sync:     strings.TrimSpace(spec.Queues.Sync),
 			Health:   strings.TrimSpace(spec.Queues.Health),
 		},
+		Endpoints: model.IntegrationAdapterRoute{
+			Describe: strings.TrimSpace(spec.Endpoints.Describe),
+			Discover: strings.TrimSpace(spec.Endpoints.Discover),
+			Read:     strings.TrimSpace(spec.Endpoints.Read),
+			Execute:  strings.TrimSpace(spec.Endpoints.Execute),
+			Sync:     strings.TrimSpace(spec.Endpoints.Sync),
+			Health:   strings.TrimSpace(spec.Endpoints.Health),
+		},
 		TimeoutSeconds: spec.TimeoutSeconds,
 	}
 }
@@ -440,6 +448,7 @@ func integrationDescribeCacheKey(typeManifest model.Manifest, typeSpec model.Int
 		typeManifest.Checksum,
 		strings.TrimSpace(typeSpec.Adapter.Version),
 		strings.TrimSpace(typeSpec.Adapter.Queues.Describe),
+		strings.TrimSpace(typeSpec.Adapter.Endpoints.Describe),
 	}, ":")
 }
 

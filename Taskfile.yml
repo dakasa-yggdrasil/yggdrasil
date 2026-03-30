@@ -74,6 +74,13 @@ tasks:
     cmds:
       - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh exec yggdrasil-core sh -lc "/usr/local/go/bin/go run ./scripts/bootstrap --path ./docs/bootstrap/manifests"
 
+  smoke:
+    desc: Run a live smoke check against the local Yggdrasil stack
+    deps: [up]
+    cmds:
+      - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh restart yggdrasil-core yggdrasil-auth-surface yggdrasil-console
+      - ./scripts/smoke.sh
+
   integrations:list:
     desc: List installable integrations from the workspace catalog
     cmds:

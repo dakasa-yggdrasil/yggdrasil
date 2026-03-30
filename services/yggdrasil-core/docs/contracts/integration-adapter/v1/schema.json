@@ -39,6 +39,18 @@
       },
       "additionalProperties": false
     },
+    "integrationAdapterRoute": {
+      "type": "object",
+      "properties": {
+        "describe": { "type": "string" },
+        "discover": { "type": "string" },
+        "read": { "type": "string" },
+        "execute": { "type": "string" },
+        "sync": { "type": "string" },
+        "health": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "integrationAdapterSpec": {
       "type": "object",
       "required": ["transport", "version", "queues"],
@@ -46,6 +58,7 @@
         "transport": { "type": "string" },
         "version": { "type": "string" },
         "queues": { "$ref": "#/$defs/integrationAdapterQueue" },
+        "endpoints": { "$ref": "#/$defs/integrationAdapterRoute" },
         "timeout_seconds": { "type": "integer" }
       },
       "additionalProperties": false
@@ -191,6 +204,7 @@
         "status": { "type": "string" },
         "owners": { "type": "array", "items": { "type": "string" } },
         "credentials": { "type": "object", "additionalProperties": true },
+        "credentials_ref": { "type": "string" },
         "config": { "type": "object", "additionalProperties": true },
         "discovery": { "$ref": "#/$defs/integrationInstanceDiscoverySpec" },
         "execution": { "$ref": "#/$defs/integrationInstanceExecutionSpec" }

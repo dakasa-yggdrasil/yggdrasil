@@ -7,6 +7,7 @@ The current service foundation includes:
 - PostgreSQL for persistence
 - HTTP as the synchronous ingress path for consoles and custom surfaces
 - RabbitMQ as the current optional async transport backend for integrations and workers
+- pluggable adapter transport contracts, with `rabbitmq` and `http_json` support for outbound integration calls
 - Goose for SQL migrations
 - core identity storage for collaborators, teams, and memberships
 - core-owned password credentials and session storage
@@ -25,7 +26,9 @@ The current service foundation includes:
 - composed authorization evaluation across RBAC and policy
 - structured logging for worker execution
 - direct auth/session HTTP endpoints under `/api/v1/auth/...`
+- direct domain HTTP endpoints under `/api/v1/...`
 - direct console-oriented HTTP endpoints under `/api/v1/console/...`
+- managed secrets stored in the core and referenceable through `secret://namespace/name[#key]`
 
 ## Public contracts
 
@@ -96,6 +99,7 @@ The first supported kinds are:
 
 - reference to one `integration_type`
 - concrete credentials and instance config
+- optional `credentials_ref` pointing at core-managed secrets
 - owners and lifecycle status
 - discovery scheduling/enablement
 - runtime execution overrides such as batch size and default dry-run
@@ -168,6 +172,20 @@ The direct core auth endpoints are:
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/session`
 - `POST /api/v1/auth/logout`
+
+Additional direct core endpoints now include:
+
+- `/api/v1/collaborators`
+- `/api/v1/teams`
+- `/api/v1/team-memberships`
+- `/api/v1/integration-catalog`
+- `/api/v1/catalog/discovery`
+- `/api/v1/catalog/discovery/register`
+- `/api/v1/integration-instances`
+- `/api/v1/secrets`
+- `/api/v1/products`
+- `/api/v1/surfaces`
+- `/api/v1/workflows`
 
 The intended split is:
 

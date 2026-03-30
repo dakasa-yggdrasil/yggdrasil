@@ -4,13 +4,14 @@ import "time"
 
 // IntegrationInstanceManifestSpec defines one concrete installation of an integration_type.
 type IntegrationInstanceManifestSpec struct {
-	TypeRef     ManifestSelector                 `json:"type_ref"`
-	Status      string                           `json:"status,omitempty"`
-	Owners      []string                         `json:"owners,omitempty"`
-	Credentials map[string]any                   `json:"credentials,omitempty"`
-	Config      map[string]any                   `json:"config,omitempty"`
-	Discovery   IntegrationInstanceDiscoverySpec `json:"discovery"`
-	Execution   IntegrationInstanceExecutionSpec `json:"execution,omitempty"`
+	TypeRef        ManifestSelector                 `json:"type_ref"`
+	Status         string                           `json:"status,omitempty"`
+	Owners         []string                         `json:"owners,omitempty"`
+	Credentials    map[string]any                   `json:"credentials,omitempty"`
+	CredentialsRef string                           `json:"credentials_ref,omitempty"`
+	Config         map[string]any                   `json:"config,omitempty"`
+	Discovery      IntegrationInstanceDiscoverySpec `json:"discovery"`
+	Execution      IntegrationInstanceExecutionSpec `json:"execution,omitempty"`
 }
 
 // IntegrationInstanceDiscoverySpec configures how one integration instance is synchronized.

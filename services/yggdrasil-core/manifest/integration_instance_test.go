@@ -24,6 +24,25 @@ func TestValidateIntegrationInstanceSpecRequiresTypeRef(t *testing.T) {
 	}
 }
 
+func TestValidateIntegrationInstanceSpecAllowsCredentialsRef(t *testing.T) {
+	spec := integrationInstanceSpecFixture()
+	spec.Credentials = nil
+	spec.CredentialsRef = "secret://github/platform"
+
+	if err := ValidateIntegrationInstanceSpec(spec); err != nil {
+		t.Fatalf("ValidateIntegrationInstanceSpec(credentials_ref) error: %v", err)
+	}
+}
+
+func TestValidateIntegrationInstanceSpecRejectsInvalidCredentialsRef(t *testing.T) {
+	spec := integrationInstanceSpecFixture()
+	spec.CredentialsRef = "vault://github/platform"
+
+	if err := ValidateIntegrationInstanceSpec(spec); err == nil {
+		t.Fatal("expected invalid credentials_ref to fail validation")
+	}
+}
+
 func TestIntegrationInstanceDocumentValidation(t *testing.T) {
 	raw, err := json.Marshal(integrationInstanceSpecFixture())
 	if err != nil {

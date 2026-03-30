@@ -19,7 +19,7 @@ var (
 		"sync",
 		"health",
 	}
-	supportedIntegrationTransports     = []string{"rabbitmq"}
+	supportedIntegrationTransports     = []string{"rabbitmq", "http_json"}
 	supportedIntegrationSchemaModes    = []string{"none", "inline", "secret_ref"}
 	supportedIntegrationSchemaTypes    = []string{"string", "number", "integer", "boolean", "object", "array"}
 	supportedIntegrationDiscoveryModes = []string{"pull", "push", "hybrid"}
@@ -98,11 +98,26 @@ func validateIntegrationAdapter(adapter model.IntegrationAdapterSpec, capabiliti
 		"sync":     strings.TrimSpace(adapter.Queues.Sync),
 		"health":   strings.TrimSpace(adapter.Queues.Health),
 	}
+	endpoints := map[string]string{
+		"describe": strings.TrimSpace(adapter.Endpoints.Describe),
+		"discover": strings.TrimSpace(adapter.Endpoints.Discover),
+		"read":     strings.TrimSpace(adapter.Endpoints.Read),
+		"execute":  strings.TrimSpace(adapter.Endpoints.Execute),
+		"sync":     strings.TrimSpace(adapter.Endpoints.Sync),
+		"health":   strings.TrimSpace(adapter.Endpoints.Health),
+	}
 
 	capabilitySet := toIntegrationNameSet(capabilities)
 	for capability := range capabilitySet {
-		if queues[capability] == "" {
-			return fmt.Errorf("integration_type adapter queue for capability %q is required", capability)
+		switch transport {
+		case "rabbitmq":
+			if queues[capability] == "" {
+				return fmt.Errorf("integration_type adapter queue for capability %q is required", capability)
+			}
+		case "http_json":
+			if endpoints[capability] == "" {
+				return fmt.Errorf("integration_type adapter endpoint for capability %q is required", capability)
+			}
 		}
 	}
 

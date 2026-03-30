@@ -24,6 +24,24 @@ func TestValidateIntegrationTypeSpecRequiresCapabilityQueue(t *testing.T) {
 	}
 }
 
+func TestValidateIntegrationTypeSpecAllowsHTTPJSONEndpoints(t *testing.T) {
+	spec := integrationTypeSpecFixture()
+	spec.Adapter.Transport = "http_json"
+	spec.Adapter.Queues = model.IntegrationAdapterQueue{}
+	spec.Adapter.Endpoints = model.IntegrationAdapterRoute{
+		Describe: "/describe",
+		Discover: "/discover",
+		Read:     "/read",
+		Execute:  "/execute",
+		Sync:     "/sync",
+		Health:   "/health",
+	}
+
+	if err := ValidateIntegrationTypeSpec(spec); err != nil {
+		t.Fatalf("ValidateIntegrationTypeSpec(http_json) error: %v", err)
+	}
+}
+
 func TestValidateIntegrationTypeSpecRejectsUnknownActionResourceType(t *testing.T) {
 	spec := integrationTypeSpecFixture()
 	spec.ActionCatalog[0].ResourceTypes = []string{"unknown"}

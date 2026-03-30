@@ -653,6 +653,9 @@ func resolveIntegrationInstance(
 	if err != nil {
 		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, fmt.Errorf("parse integration instance spec: %w", err)
 	}
+	if err := hydrateIntegrationInstanceSecrets(ctx, db, &instanceSpec); err != nil {
+		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, err
+	}
 
 	typeManifest, err := resolveManifestForKind(ctx, db, "integration_type", instanceSpec.TypeRef.ManifestID, instanceSpec.TypeRef.Namespace, instanceSpec.TypeRef.Name, instanceSpec.TypeRef.Version)
 	if err != nil {
@@ -662,10 +665,6 @@ func resolveIntegrationInstance(
 	typeSpec, err := manifestengine.ParseIntegrationTypeSpec(typeManifest.Spec)
 	if err != nil {
 		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, fmt.Errorf("parse integration type spec: %w", err)
-	}
-
-	if strings.ToLower(strings.TrimSpace(typeSpec.Adapter.Transport)) != "rabbitmq" {
-		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, fmt.Errorf("integration type transport %q is unsupported for product generation", typeSpec.Adapter.Transport)
 	}
 
 	if err := preflightIntegrationInstanceHealth(
@@ -679,11 +678,60 @@ func resolveIntegrationInstance(
 		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, err
 	}
 
-	if err := verifyResolvedIntegrationType(ctx, conn, db, typeManifest, typeSpec); err != nil {
+	if err := verifyResolvedIntegrationType(ctx, conn, db, typeManifest, instanceSpec, typeSpec); err != nil {
 		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, err
 	}
 
 	return instanceManifest, instanceSpec, typeManifest, typeSpec, nil
+}
+
+func hydrateIntegrationInstanceSecrets(ctx context.Context, db *sql.DB, spec *model.IntegrationInstanceManifestSpec) error {
+	if spec == nil || db == nil {
+		return nil
+	}
+
+	if strings.TrimSpace(spec.CredentialsRef) != "" {
+		value, err := repository.ResolveSecretRef(ctx, db, spec.CredentialsRef)
+		if err != nil {
+			return fmt.Errorf("resolve integration instance credentials_ref: %w", err)
+		}
+
+		switch typed := value.(type) {
+		case map[string]any:
+			spec.Credentials = mergeStringAnyMaps(spec.Credentials, typed)
+		case map[string]string:
+			if spec.Credentials == nil {
+				spec.Credentials = map[string]any{}
+			}
+			for key, item := range typed {
+				spec.Credentials[key] = item
+			}
+		default:
+			return fmt.Errorf("integration instance credentials_ref must resolve to an object")
+		}
+	}
+
+	if len(spec.Credentials) > 0 {
+		resolved, err := repository.ResolveSecretRefs(ctx, db, cloneAuthorizationInput(spec.Credentials))
+		if err != nil {
+			return fmt.Errorf("resolve integration instance credentials: %w", err)
+		}
+		if typed, ok := resolved.(map[string]any); ok {
+			spec.Credentials = typed
+		}
+	}
+
+	if len(spec.Config) > 0 {
+		resolved, err := repository.ResolveSecretRefs(ctx, db, cloneAuthorizationInput(spec.Config))
+		if err != nil {
+			return fmt.Errorf("resolve integration instance config: %w", err)
+		}
+		if typed, ok := resolved.(map[string]any); ok {
+			spec.Config = typed
+		}
+	}
+
+	return nil
 }
 
 func manifestReferencePointer(value model.ManifestReference) *model.ManifestReference {

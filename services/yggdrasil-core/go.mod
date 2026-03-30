@@ -3,6 +3,7 @@ module github.com/dakasa-co/yggdrasil-core
 go 1.25.0
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.0
 	github.com/pressly/goose/v3 v3.27.0

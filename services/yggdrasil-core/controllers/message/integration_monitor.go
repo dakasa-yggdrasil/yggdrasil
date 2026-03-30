@@ -96,7 +96,14 @@ func runIntegrationRuntimeMonitorSweep(
 			continue
 		}
 
-		if err := verifyResolvedIntegrationType(ctx, conn, db, manifestRecord, spec); err != nil && logger != nil {
+		if err := verifyResolvedIntegrationType(
+			ctx,
+			conn,
+			db,
+			manifestRecord,
+			model.IntegrationInstanceManifestSpec{},
+			spec,
+		); err != nil && logger != nil {
 			logger.Warn(
 				"integration runtime monitor handshake failed",
 				zap.String("namespace", manifestRecord.Metadata.Namespace),

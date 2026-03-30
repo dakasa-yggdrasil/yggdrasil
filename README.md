@@ -133,6 +133,12 @@ Importe os bootstrap manifests do core:
 task bootstrap:core
 ```
 
+Rode o smoke end-to-end do produto:
+
+```bash
+task smoke
+```
+
 Abra o console:
 
 ```bash
@@ -192,6 +198,7 @@ Para detalhes de fluxo local, variáveis e convenções, veja
 - portas e nomes de serviço estáveis
 - banco local enxuto para o produto atual, sem seed obrigatório de surfaces legadas
 - `Taskfile` local para `up`, `down`, `logs`, `ps`, `shell` e `test`
+- smoke end-to-end versionado no próprio repo, reutilizável localmente e em CI
 
 Para a regra arquitetural do produto, veja
 [`docs/architecture/product-repo.md`](/Users/dakasa/projects/yggdrasil/docs/architecture/product-repo.md).

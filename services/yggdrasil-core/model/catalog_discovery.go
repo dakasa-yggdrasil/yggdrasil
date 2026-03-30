@@ -33,39 +33,46 @@ type CatalogDiscoverySource struct {
 
 // CatalogDiscoveryCandidate is the normalized shape expected from one discovery-capable plugin.
 type CatalogDiscoveryCandidate struct {
-	Kind        string            `json:"kind"`
-	Name        string            `json:"name"`
-	Namespace   string            `json:"namespace,omitempty"`
-	DisplayName string            `json:"display_name,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Domain      string            `json:"domain,omitempty"`
-	Section     string            `json:"section,omitempty"`
-	Entry       string            `json:"entry,omitempty"`
-	Repository  string            `json:"repository,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Metadata    map[string]any    `json:"metadata,omitempty"`
+	Kind         string                        `json:"kind"`
+	Name         string                        `json:"name"`
+	Namespace    string                        `json:"namespace,omitempty"`
+	DisplayName  string                        `json:"display_name,omitempty"`
+	Description  string                        `json:"description,omitempty"`
+	Domain       string                        `json:"domain,omitempty"`
+	Section      string                        `json:"section,omitempty"`
+	Entry        string                        `json:"entry,omitempty"`
+	Repository   string                        `json:"repository,omitempty"`
+	Labels       map[string]string             `json:"labels,omitempty"`
+	Metadata     map[string]any                `json:"metadata,omitempty"`
+	Registration *CatalogDiscoveryRegistration `json:"registration,omitempty"`
 }
 
 // CatalogDiscoveryItem is one discovered candidate enriched with core registration state.
 type CatalogDiscoveryItem struct {
-	Source             CatalogDiscoverySource   `json:"source"`
-	Kind               string                   `json:"kind"`
-	Name               string                   `json:"name"`
-	Namespace          string                   `json:"namespace,omitempty"`
-	DisplayName        string                   `json:"display_name,omitempty"`
-	Description        string                   `json:"description,omitempty"`
-	Domain             string                   `json:"domain,omitempty"`
-	Section            string                   `json:"section,omitempty"`
-	Entry              string                   `json:"entry,omitempty"`
-	Repository         string                   `json:"repository,omitempty"`
-	Labels             map[string]string        `json:"labels,omitempty"`
-	Metadata           map[string]any           `json:"metadata,omitempty"`
-	RegisteredManifest *ManifestReference       `json:"registered_manifest,omitempty"`
-	RegistrationStatus string                   `json:"registration_status"`
+	Source             CatalogDiscoverySource        `json:"source"`
+	Kind               string                        `json:"kind"`
+	Name               string                        `json:"name"`
+	Namespace          string                        `json:"namespace,omitempty"`
+	DisplayName        string                        `json:"display_name,omitempty"`
+	Description        string                        `json:"description,omitempty"`
+	Domain             string                        `json:"domain,omitempty"`
+	Section            string                        `json:"section,omitempty"`
+	Entry              string                        `json:"entry,omitempty"`
+	Repository         string                        `json:"repository,omitempty"`
+	Labels             map[string]string             `json:"labels,omitempty"`
+	Metadata           map[string]any                `json:"metadata,omitempty"`
+	Registration       *CatalogDiscoveryRegistration `json:"registration,omitempty"`
+	RegisteredManifest *ManifestReference            `json:"registered_manifest,omitempty"`
+	RegistrationStatus string                        `json:"registration_status"`
 }
 
 // DiscoverCatalogResponse returns the normalized discovery results together with source status.
 type DiscoverCatalogResponse struct {
 	Sources []CatalogDiscoverySource `json:"sources"`
 	Items   []CatalogDiscoveryItem   `json:"items"`
+}
+
+// CatalogDiscoveryRegistration describes one optional manifest candidate that can be registered in the core.
+type CatalogDiscoveryRegistration struct {
+	Manifest ManifestDocument `json:"manifest"`
 }

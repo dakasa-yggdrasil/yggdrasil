@@ -19,19 +19,18 @@ import (
 	"go.uber.org/zap"
 )
 
-var errIntegrationTransportUnavailable = errors.New("integration transport is unavailable")
-
 type consoleCreateIntegrationInstanceRequest struct {
-	Name        string            `json:"name"`
-	Namespace   string            `json:"namespace,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	TypeRef     model.ManifestSelector `json:"type_ref"`
-	Status      string            `json:"status,omitempty"`
-	Owners      []string          `json:"owners,omitempty"`
-	Credentials map[string]any    `json:"credentials,omitempty"`
-	Config      map[string]any    `json:"config,omitempty"`
-	Discovery   struct {
+	Name           string                 `json:"name"`
+	Namespace      string                 `json:"namespace,omitempty"`
+	Description    string                 `json:"description,omitempty"`
+	Labels         map[string]string      `json:"labels,omitempty"`
+	TypeRef        model.ManifestSelector `json:"type_ref"`
+	Status         string                 `json:"status,omitempty"`
+	Owners         []string               `json:"owners,omitempty"`
+	Credentials    map[string]any         `json:"credentials,omitempty"`
+	CredentialsRef string                 `json:"credentials_ref,omitempty"`
+	Config         map[string]any         `json:"config,omitempty"`
+	Discovery      struct {
 		Enabled             bool   `json:"enabled"`
 		Mode                string `json:"mode,omitempty"`
 		SyncIntervalSeconds int    `json:"sync_interval_seconds,omitempty"`
@@ -50,13 +49,17 @@ type consoleCreateManifestRequest struct {
 	Spec        json.RawMessage   `json:"spec"`
 }
 
+type catalogDiscoveryRegisterRequest struct {
+	Registration model.CatalogDiscoveryRegistration `json:"registration"`
+}
+
 type integrationCatalogResponse struct {
 	Domains []model.IntegrationCatalogDomain `json:"domains"`
 }
 
 type integrationCatalogEntryDetailResponse struct {
 	Entry                   model.IntegrationCatalogEntry `json:"entry"`
-	IntegrationTypeManifest model.Manifest               `json:"integrationTypeManifest"`
+	IntegrationTypeManifest model.Manifest                `json:"integrationTypeManifest"`
 }
 
 type collaboratorsResponse struct {
@@ -73,6 +76,10 @@ type membershipsResponse struct {
 
 type manifestsResponse struct {
 	Manifests []model.Manifest `json:"manifests"`
+}
+
+type managedSecretsResponse struct {
+	Secrets []model.ManagedSecret `json:"secrets"`
 }
 
 type errorResponse struct {
@@ -112,9 +119,32 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleAuthLogin)
 	mux.HandleFunc("GET /api/v1/auth/session", server.handleAuthSession)
 	mux.HandleFunc("POST /api/v1/auth/logout", server.handleAuthLogout)
+	mux.HandleFunc("GET /api/v1/integration-catalog", server.handleIntegrationCatalogList)
+	mux.HandleFunc("GET /api/v1/integration-catalog/{domain}/{section}/{entry}", server.handleIntegrationCatalogEntry)
+	mux.HandleFunc("GET /api/v1/catalog/discovery", server.handleCatalogDiscovery)
+	mux.HandleFunc("POST /api/v1/catalog/discovery/register", server.handleCatalogDiscoveryRegister)
+	mux.HandleFunc("GET /api/v1/integration-instances", server.handleIntegrationInstanceList)
+	mux.HandleFunc("POST /api/v1/integration-instances", server.handleIntegrationInstanceCreate)
+	mux.HandleFunc("GET /api/v1/collaborators", server.handleCollaboratorList)
+	mux.HandleFunc("POST /api/v1/collaborators", server.handleCollaboratorCreate)
+	mux.HandleFunc("GET /api/v1/teams", server.handleTeamList)
+	mux.HandleFunc("POST /api/v1/teams", server.handleTeamCreate)
+	mux.HandleFunc("GET /api/v1/team-memberships", server.handleTeamMembershipList)
+	mux.HandleFunc("POST /api/v1/team-memberships", server.handleTeamMembershipUpsert)
+	mux.HandleFunc("GET /api/v1/products", server.handleProductList)
+	mux.HandleFunc("POST /api/v1/products", server.handleProductCreate)
+	mux.HandleFunc("GET /api/v1/secrets", server.handleManagedSecretList)
+	mux.HandleFunc("GET /api/v1/secrets/{namespace}/{name}", server.handleManagedSecretGet)
+	mux.HandleFunc("POST /api/v1/secrets", server.handleManagedSecretCreate)
+	mux.HandleFunc("GET /api/v1/surfaces", server.handleSurfaceList)
+	mux.HandleFunc("POST /api/v1/surfaces", server.handleSurfaceCreate)
+	mux.HandleFunc("GET /api/v1/workflows", server.handleWorkflowList)
+	mux.HandleFunc("POST /api/v1/workflows", server.handleWorkflowCreate)
 	mux.HandleFunc("GET /api/v1/console/integration-catalog", server.handleIntegrationCatalogList)
 	mux.HandleFunc("GET /api/v1/console/integration-catalog/{domain}/{section}/{entry}", server.handleIntegrationCatalogEntry)
 	mux.HandleFunc("GET /api/v1/console/catalog-discovery", server.handleCatalogDiscovery)
+	mux.HandleFunc("POST /api/v1/console/catalog-discovery/register", server.handleCatalogDiscoveryRegister)
+	mux.HandleFunc("GET /api/v1/console/integration-instances", server.handleIntegrationInstanceList)
 	mux.HandleFunc("POST /api/v1/console/integration-instances", server.handleIntegrationInstanceCreate)
 	mux.HandleFunc("GET /api/v1/console/collaborators", server.handleCollaboratorList)
 	mux.HandleFunc("POST /api/v1/console/collaborators", server.handleCollaboratorCreate)
@@ -124,6 +154,9 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/console/team-memberships", server.handleTeamMembershipUpsert)
 	mux.HandleFunc("GET /api/v1/console/products", server.handleProductList)
 	mux.HandleFunc("POST /api/v1/console/products", server.handleProductCreate)
+	mux.HandleFunc("GET /api/v1/console/secrets", server.handleManagedSecretList)
+	mux.HandleFunc("GET /api/v1/console/secrets/{namespace}/{name}", server.handleManagedSecretGet)
+	mux.HandleFunc("POST /api/v1/console/secrets", server.handleManagedSecretCreate)
 	mux.HandleFunc("GET /api/v1/console/surfaces", server.handleSurfaceList)
 	mux.HandleFunc("POST /api/v1/console/surfaces", server.handleSurfaceCreate)
 	mux.HandleFunc("GET /api/v1/console/workflows", server.handleWorkflowList)
@@ -211,11 +244,6 @@ func (s *Server) handleIntegrationCatalogEntry(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) handleCatalogDiscovery(w http.ResponseWriter, r *http.Request) {
-	if s.rabbitmq == nil {
-		writeMappedError(w, errIntegrationTransportUnavailable)
-		return
-	}
-
 	response, err := messagecontroller.DiscoverCatalog(r.Context(), s.rabbitmq, s.db, model.DiscoverCatalogRequest{
 		Source: model.ManifestSelector{
 			ManifestID: queryString(r, "source_manifest_id"),
@@ -233,6 +261,26 @@ func (s *Server) handleCatalogDiscovery(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleCatalogDiscoveryRegister(w http.ResponseWriter, r *http.Request) {
+	var req catalogDiscoveryRegisterRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	manifestRecord, err := createManifestVersion(r.Context(), s.db, req.Registration.Manifest)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{"manifest": manifestRecord})
+}
+
+func (s *Server) handleIntegrationInstanceList(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestList(w, r, "integration_instance")
 }
 
 func (s *Server) handleIntegrationInstanceCreate(w http.ResponseWriter, r *http.Request) {
@@ -255,6 +303,48 @@ func (s *Server) handleIntegrationInstanceCreate(w http.ResponseWriter, r *http.
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{"manifest": manifestRecord})
+}
+
+func (s *Server) handleManagedSecretList(w http.ResponseWriter, r *http.Request) {
+	secrets, err := repository.ListManagedSecrets(r.Context(), s.db, model.ListManagedSecretsRequest{
+		Namespace: queryString(r, "namespace"),
+		Status:    queryString(r, "status"),
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, managedSecretsResponse{Secrets: secrets})
+}
+
+func (s *Server) handleManagedSecretGet(w http.ResponseWriter, r *http.Request) {
+	secret, err := repository.GetManagedSecret(r.Context(), s.db, model.GetManagedSecretRequest{
+		Namespace: r.PathValue("namespace"),
+		Name:      r.PathValue("name"),
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"secret": secret})
+}
+
+func (s *Server) handleManagedSecretCreate(w http.ResponseWriter, r *http.Request) {
+	var req model.UpsertManagedSecretRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	secret, err := repository.UpsertManagedSecret(r.Context(), s.db, req)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{"secret": secret})
 }
 
 func (s *Server) handleCollaboratorList(w http.ResponseWriter, r *http.Request) {
@@ -406,11 +496,12 @@ func (s *Server) handleManifestCreate(w http.ResponseWriter, r *http.Request, ki
 
 func integrationInstanceDocumentFromPayload(payload consoleCreateIntegrationInstanceRequest) (model.ManifestDocument, error) {
 	spec := model.IntegrationInstanceManifestSpec{
-		TypeRef: payload.TypeRef,
-		Status:  payload.Status,
-		Owners:  payload.Owners,
-		Credentials: cloneAnyMap(payload.Credentials),
-		Config:      cloneAnyMap(payload.Config),
+		TypeRef:        payload.TypeRef,
+		Status:         payload.Status,
+		Owners:         payload.Owners,
+		Credentials:    cloneAnyMap(payload.Credentials),
+		CredentialsRef: strings.TrimSpace(payload.CredentialsRef),
+		Config:         cloneAnyMap(payload.Config),
 		Discovery: model.IntegrationInstanceDiscoverySpec{
 			Enabled:             payload.Discovery.Enabled,
 			Mode:                payload.Discovery.Mode,
@@ -509,7 +600,7 @@ func httpStatusFromError(err error) int {
 	switch {
 	case err == nil:
 		return http.StatusOK
-	case errors.Is(err, errIntegrationTransportUnavailable):
+	case errors.Is(err, messagecontroller.ErrAdapterTransportUnavailable):
 		return http.StatusServiceUnavailable
 	case errors.Is(err, repository.ErrAuthInvalidCredentials),
 		errors.Is(err, repository.ErrAuthSessionNotFound),
@@ -518,7 +609,8 @@ func httpStatusFromError(err error) int {
 		return http.StatusUnauthorized
 	case errors.Is(err, repository.ErrManifestNotFound),
 		errors.Is(err, repository.ErrCollaboratorNotFound),
-		errors.Is(err, repository.ErrTeamNotFound):
+		errors.Is(err, repository.ErrTeamNotFound),
+		errors.Is(err, repository.ErrManagedSecretNotFound):
 		return http.StatusNotFound
 	}
 

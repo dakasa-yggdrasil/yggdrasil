@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+
+jobs:
+  product:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Task
+        uses: arduino/setup-task@v2
+
+      - name: Verify toolchain
+        run: task doctor
+
+      - name: Check architecture boundaries
+        run: task arch:check
+
+      - name: Validate compose configuration
+        run: task config
+
+      - name: Start local stack
+        run: task up
+
+      - name: Bootstrap core manifests
+        run: task bootstrap:core
+
+      - name: Run live smoke checks
+        run: task smoke
+
+      - name: Stop local stack
+        if: always()
+        run: task down

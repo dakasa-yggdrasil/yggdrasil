@@ -40,6 +40,11 @@ func ValidateIntegrationInstanceSpec(spec model.IntegrationInstanceManifestSpec)
 	if err := validateNamedStringList("integration_instance owners", spec.Owners); err != nil {
 		return err
 	}
+	if strings.TrimSpace(spec.CredentialsRef) != "" {
+		if !strings.HasPrefix(strings.TrimSpace(spec.CredentialsRef), "secret://") {
+			return fmt.Errorf("integration_instance credentials_ref must use secret:// references")
+		}
+	}
 	if err := validateLooseObject("integration_instance credentials", spec.Credentials); err != nil {
 		return err
 	}
