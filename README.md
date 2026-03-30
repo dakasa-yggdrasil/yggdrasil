@@ -94,7 +94,9 @@ task surfaces:install NAME=yggdrasil-auth-surface
 task surfaces:install NAME=yggdrasil-console
 ```
 
-Crie uma nova surface a partir do template de referência:
+Crie uma nova surface a partir da base oficial [`surface-template`](https://github.com/dakasa-yggdrasil/surface-template).
+
+Se você só quiser um scaffold rápido dentro do workspace local, ainda existe o atalho:
 
 ```bash
 task surfaces:scaffold NAME=my-domain-api
@@ -163,6 +165,10 @@ quiser, ela pode:
 - adicionar APIs nichadas próprias por domínio
 
 Desde que essas surfaces continuem falando com o [`yggdrasil-core`](/Users/dakasa/projects/yggdrasil/services/yggdrasil-core).
+
+Para criar uma nova surface própria, o caminho preferencial agora é começar por
+[`surface-template`](https://github.com/dakasa-yggdrasil/surface-template) e
+depois instalar esse repositório no workspace.
 
 O catálogo [`catalog/surfaces.active`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.active)
 define o runtime oficial que sobe com `task up`.

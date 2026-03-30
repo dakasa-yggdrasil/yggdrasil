@@ -22,7 +22,6 @@ task surfaces:list
 task surfaces:active
 task surfaces:install NAME=yggdrasil-auth-surface
 task surfaces:install NAME=yggdrasil-console
-task surfaces:scaffold NAME=my-domain-api
 task integrations:list
 task env:init
 task up
@@ -108,7 +107,8 @@ Isso evita um problema comum em monorepos Docker: um serviço parar toda a infra
 - integrations instaladas como `git submodule`
 - compose do root descobrindo automaticamente integrations instaladas
 - compose do root carregando apenas as surfaces marcadas como ativas e instaladas
-- template de surface disponível via `task surfaces:scaffold`
+- base oficial para novas surfaces em [`surface-template`](https://github.com/dakasa-yggdrasil/surface-template)
+- `task surfaces:scaffold` como espelho local dessa base para bootstrap rápido
 
 ## Banco local
 
@@ -125,6 +125,7 @@ O Postgres compartilhado cria:
 - use `task integrations:list` para ver o catálogo disponível
 - use `task surfaces:list` para ver o catálogo de surfaces disponível
 - use `task surfaces:install NAME=<slug>` para instalar uma surface de referência
-- use `task surfaces:scaffold NAME=<slug>` para criar uma nova surface de referência a partir do template
+- prefira criar novas surfaces a partir de [`surface-template`](https://github.com/dakasa-yggdrasil/surface-template)
+- use `task surfaces:scaffold NAME=<slug>` só quando quiser um scaffold local rápido dentro do workspace
 - use `task integrations:install NAME=<slug>` para instalar uma integration específica
 - se precisar resetar tudo, faça isso no root com `task down` e depois remova volumes manualmente no Docker Desktop

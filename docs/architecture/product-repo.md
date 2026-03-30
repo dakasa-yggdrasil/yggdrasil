@@ -71,6 +71,9 @@ O catálogo instalável dessas surfaces fica em
 [`catalog/surfaces.json`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.json).
 
 Isso significa que as surfaces de referência podem viver em repositórios próprios.
+O ponto de partida oficial para novas surfaces é
+[`surface-template`](https://github.com/dakasa-yggdrasil/surface-template).
+
 O produto principal só precisa saber:
 
 - quais surfaces existem no catálogo

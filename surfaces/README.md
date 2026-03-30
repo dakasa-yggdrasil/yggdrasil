@@ -32,11 +32,21 @@ task surfaces:install NAME=yggdrasil-auth-surface
 task surfaces:install NAME=yggdrasil-console
 ```
 
-Você pode criar uma nova surface de referência com:
+Você pode criar uma nova surface a partir da base oficial
+[`surface-template`](https://github.com/dakasa-yggdrasil/surface-template).
+
+Se quiser apenas gerar uma cópia rápida dentro do workspace local, use:
 
 ```bash
 task surfaces:scaffold NAME=my-domain-api
 ```
+
+O `task surfaces:scaffold` é um espelho local dessa base oficial, útil para
+experimentação e bootstrap rápido. A convenção preferida para surfaces reais é:
+
+1. criar um repositório a partir de `surface-template`
+2. publicar a surface no GitHub da empresa
+3. registrar/instalar essa surface no workspace do produto
 
 ## Regra
 
