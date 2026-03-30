@@ -1,0 +1,21 @@
+{
+  "version": "v1",
+  "surfaces": [
+    {
+      "slug": "yggdrasil-auth-surface",
+      "repo_name": "yggdrasil-auth-surface",
+      "display_name": "Yggdrasil Auth Surface",
+      "category": "auth",
+      "repo_url": "https://github.com/dakasa-yggdrasil/yggdrasil-auth-surface.git",
+      "description": "Reference collaborator-facing auth surface for Yggdrasil."
+    },
+    {
+      "slug": "yggdrasil-console",
+      "repo_name": "yggdrasil-console",
+      "display_name": "Yggdrasil Console",
+      "category": "console",
+      "repo_url": "https://github.com/dakasa-yggdrasil/yggdrasil-console.git",
+      "description": "Reference operator-facing web console for Yggdrasil."
+    }
+  ]
+}

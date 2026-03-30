@@ -1,6 +1,6 @@
 # Surfaces
 
-`surfaces/` contém os serviços de borda do produto.
+`surfaces/` contém os serviços de borda instalados no workspace do produto.
 
 Aqui entram:
 
@@ -14,13 +14,23 @@ Esses serviços **não** são o coração do produto.
 
 O coração continua sendo `services/yggdrasil-core`.
 
-As surfaces de referência ativas do produto hoje são:
+As surfaces de referência do produto hoje são:
 
 - `yggdrasil-auth-surface`
 - `yggdrasil-console`
 
 O runtime oficial é controlado por
 [`catalog/surfaces.active`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.active).
+
+O catálogo instalável das surfaces fica em
+[`catalog/surfaces.json`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.json).
+
+Você pode instalar uma surface de referência com:
+
+```bash
+task surfaces:install NAME=yggdrasil-auth-surface
+task surfaces:install NAME=yggdrasil-console
+```
 
 Você pode criar uma nova surface de referência com:
 

@@ -19,6 +19,9 @@ No root do workspace:
 task doctor
 task arch:check
 task surfaces:list
+task surfaces:active
+task surfaces:install NAME=yggdrasil-auth-surface
+task surfaces:install NAME=yggdrasil-console
 task surfaces:scaffold NAME=my-domain-api
 task integrations:list
 task env:init
@@ -40,6 +43,7 @@ task integrations:tui
 - `surfaces/*/.env`: variáveis específicas das surfaces
 - `integrations/*/.env`: variáveis específicas de cada plugin
 - o console de referência usa o `yggdrasil-core` HTTP em `http://localhost:9080` por padrão no host
+- as surfaces de referência são repositórios instaláveis, não código obrigatoriamente vendorizado no produto
 
 Cada slice carrega:
 
@@ -98,11 +102,12 @@ Isso evita um problema comum em monorepos Docker: um serviço parar toda a infra
 - `Taskfile.yml` no root para orquestração do stack completo
 - `services/` reservado para o coração do produto
 - `surfaces/` reservado para APIs, auth, UIs e bordas substituíveis
+- catálogo de surfaces em `catalog/surfaces.json`
 - as surfaces ativas do runtime ficam em `catalog/surfaces.active`
 - as surfaces de referência ativas hoje são `yggdrasil-auth-surface` e `yggdrasil-console`
 - integrations instaladas como `git submodule`
 - compose do root descobrindo automaticamente integrations instaladas
-- compose do root carregando apenas as surfaces marcadas como ativas
+- compose do root carregando apenas as surfaces marcadas como ativas e instaladas
 - template de surface disponível via `task surfaces:scaffold`
 
 ## Banco local
@@ -118,6 +123,8 @@ O Postgres compartilhado cria:
 - use `task arch:check` quando mexer em fronteiras entre serviços
 - use `task bootstrap:core` depois do primeiro `task up` completo para carregar manifests bootstrap
 - use `task integrations:list` para ver o catálogo disponível
+- use `task surfaces:list` para ver o catálogo de surfaces disponível
+- use `task surfaces:install NAME=<slug>` para instalar uma surface de referência
 - use `task surfaces:scaffold NAME=<slug>` para criar uma nova surface de referência a partir do template
 - use `task integrations:install NAME=<slug>` para instalar uma integration específica
 - se precisar resetar tudo, faça isso no root com `task down` e depois remova volumes manualmente no Docker Desktop

@@ -80,9 +80,33 @@ tasks:
       - ./scripts/ygg.sh integrations list
 
   surfaces:list:
-    desc: List surfaces currently active in the product runtime
+    desc: List cataloged surfaces and their install/active status
     cmds:
       - ./scripts/ygg.sh surfaces list
+
+  surfaces:active:
+    desc: List surfaces currently active in the product runtime
+    cmds:
+      - ./scripts/ygg.sh surfaces active
+
+  surfaces:installed:
+    desc: Print docker-compose files for installed active surfaces
+    cmds:
+      - ./scripts/ygg.sh surfaces installed
+
+  surfaces:install:
+    desc: "Install a surface as a git submodule. Usage: task surfaces:install NAME=yggdrasil-console"
+    requires:
+      vars: [NAME]
+    cmds:
+      - ./scripts/ygg.sh surfaces install {{.NAME}}
+
+  surfaces:remove:
+    desc: "Remove an installed surface submodule. Usage: task surfaces:remove NAME=yggdrasil-console"
+    requires:
+      vars: [NAME]
+    cmds:
+      - ./scripts/ygg.sh surfaces remove {{.NAME}}
 
   surfaces:scaffold:
     desc: "Scaffold a new surface from the reference template. Usage: task surfaces:scaffold NAME=my-surface [MODULE=github.com/acme/my-surface]"

@@ -12,20 +12,10 @@ args=(
 )
 
 while IFS= read -r file; do
+  [[ -z "$file" ]] && continue
+  [[ -f "$file" ]] || continue
   args+=(-f "$file")
-done < <(
-  if [[ -f "$ROOT/catalog/surfaces.active" ]]; then
-    while IFS= read -r surface; do
-      surface="$(printf '%s' "$surface" | xargs)"
-      [[ -z "$surface" ]] && continue
-      [[ "$surface" == \#* ]] && continue
-      file="$ROOT/surfaces/$surface/docker-compose.yml"
-      [[ -f "$file" ]] && printf '%s\n' "$file"
-    done < "$ROOT/catalog/surfaces.active"
-  else
-    find "$ROOT/surfaces" -mindepth 2 -maxdepth 2 -name 'docker-compose.yml' -type f | sort
-  fi
-)
+done < <("$ROOT/scripts/ygg.sh" surfaces installed)
 
 while IFS= read -r file; do
   args+=(-f "$file")

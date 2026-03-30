@@ -32,10 +32,11 @@ yggdrasil/
 ├── services/
 │   └── yggdrasil-core/
 ├── surfaces/
-│   ├── yggdrasil-auth-surface/ # surface de referência ativa
-│   ├── yggdrasil-console/      # surface de referência ativa
+│   ├── yggdrasil-auth-surface/ # surface instalada quando presente
+│   ├── yggdrasil-console/      # surface instalada quando presente
 ├── catalog/
 │   ├── integrations.json
+│   ├── surfaces.json
 │   └── surfaces.active
 ├── cmd/
 │   └── ygg/
@@ -54,7 +55,8 @@ yggdrasil/
 - cada `task down` local para só o slice local, sem derrubar a infraestrutura compartilhada
 - integrations instaladas são descobertas dinamicamente pelo root, sem lista hardcoded
 - as surfaces ativas do runtime ficam em [`catalog/surfaces.active`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.active)
-- as surfaces incluídas hoje como referência oficial são `yggdrasil-auth-surface` e `yggdrasil-console`
+- o catálogo de surfaces vive em [`catalog/surfaces.json`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.json)
+- as surfaces de referência são instaláveis separadamente, como repositórios próprios
 - o catálogo de integrations vive em [`catalog/integrations.json`](/Users/dakasa/projects/yggdrasil/catalog/integrations.json)
 - integrations pertencem ao core; surfaces consomem contratos do core em vez de falar com plugins diretamente
 
@@ -78,10 +80,18 @@ Liste as integrations disponíveis:
 task integrations:list
 ```
 
-Liste as surfaces atualmente ativas:
+Liste as surfaces catalogadas:
 
 ```bash
 task surfaces:list
+task surfaces:active
+```
+
+Instale as surfaces de referência:
+
+```bash
+task surfaces:install NAME=yggdrasil-auth-surface
+task surfaces:install NAME=yggdrasil-console
 ```
 
 Crie uma nova surface a partir do template de referência:
@@ -145,7 +155,7 @@ cd integrations/integration-github && task up
 
 Cada slice sobe só o que precisa, mas reaproveita a mesma infraestrutura compartilhada.
 
-As surfaces ativas incluídas no repo hoje são as referências oficiais do produto. Se uma empresa
+As surfaces de referência do produto são repositórios separados. Se uma empresa
 quiser, ela pode:
 
 - substituir `yggdrasil-auth-surface`

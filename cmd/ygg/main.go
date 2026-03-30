@@ -57,8 +57,44 @@ func runSurfaces(manager *surfaces.Manager, args []string) error {
 		if err != nil {
 			return err
 		}
+		fmt.Print(surfaces.RenderTable(items))
+		return nil
+	case "active":
+		items, err := manager.Active()
+		if err != nil {
+			return err
+		}
 		for _, item := range items {
 			fmt.Println(item)
+		}
+		return nil
+	case "install":
+		if len(args) < 2 {
+			return errors.New("usage: ygg surfaces install <name>")
+		}
+		entry, source, err := manager.Install(args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("installed %s via %s in surfaces/%s\n", entry.Slug, source, entry.RepoName)
+		return nil
+	case "remove":
+		if len(args) < 2 {
+			return errors.New("usage: ygg surfaces remove <name>")
+		}
+		entry, err := manager.Remove(args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("removed %s from surfaces/%s\n", entry.Slug, entry.RepoName)
+		return nil
+	case "installed":
+		files, err := manager.ComposeFiles()
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			fmt.Println(file)
 		}
 		return nil
 	case "scaffold":
@@ -189,6 +225,10 @@ Usage:
   ygg integrations tui
   ygg integrations installed
   ygg surfaces list
+  ygg surfaces active
+  ygg surfaces install <name>
+  ygg surfaces remove <name>
+  ygg surfaces installed
   ygg surfaces scaffold <name> [module]
   ygg surfaces activate <name>
   ygg surfaces deactivate <name>`)
@@ -210,6 +250,10 @@ func printSurfacesUsage() {
 
 Usage:
   ygg surfaces list
+  ygg surfaces active
+  ygg surfaces install <name>
+  ygg surfaces remove <name>
+  ygg surfaces installed
   ygg surfaces scaffold <name> [module]
   ygg surfaces activate <name>
   ygg surfaces deactivate <name>`)

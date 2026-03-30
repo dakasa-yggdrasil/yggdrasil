@@ -67,6 +67,16 @@ Sem tocar no coração do produto, desde que respeite os contratos do `yggdrasil
 As surfaces de referência ativas hoje são `yggdrasil-auth-surface` e `yggdrasil-console`, definidas em
 [`catalog/surfaces.active`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.active).
 
+O catálogo instalável dessas surfaces fica em
+[`catalog/surfaces.json`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.json).
+
+Isso significa que as surfaces de referência podem viver em repositórios próprios.
+O produto principal só precisa saber:
+
+- quais surfaces existem no catálogo
+- quais estão instaladas no workspace
+- quais estão marcadas como ativas no runtime
+
 Isso também significa que uma empresa pode optar por:
 
 - manter as surfaces de referência
@@ -94,6 +104,9 @@ Elas:
 - entram como `git submodule`
 - são descobertas dinamicamente pelo root
 - continuam independentes do runtime dos serviços centrais
+
+O mesmo raciocínio vale para surfaces de referência: elas podem ser repositórios
+próprios e entrar no workspace como componentes instaláveis.
 
 ## Regra para compartilhamento
 

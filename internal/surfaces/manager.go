@@ -1,9 +1,11 @@
 package surfaces
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,15 +19,138 @@ const (
 )
 
 type Manager struct {
-	root string
+	root    string
+	catalog *Catalog
 }
 
 func NewManager(root string) *Manager {
-	return &Manager{root: root}
+	catalog, err := loadCatalog(root)
+	if err != nil {
+		return &Manager{root: root}
+	}
+	return &Manager{root: root, catalog: catalog}
 }
 
-func (m *Manager) List() ([]string, error) {
+func (m *Manager) List() ([]SurfaceStatus, error) {
+	active, err := m.loadActive()
+	if err != nil {
+		return nil, err
+	}
+	activeSet := map[string]struct{}{}
+	for _, item := range active {
+		activeSet[item] = struct{}{}
+	}
+
+	entries := make([]SurfaceStatus, 0, len(m.catalog.Surfaces))
+	for _, surface := range m.catalog.Surfaces {
+		path := filepath.Join(m.root, "surfaces", surface.RepoName)
+		installed := hasFile(filepath.Join(path, "docker-compose.yml"))
+		source := ""
+		if installed {
+			source = "remote"
+			if local := m.localSourcePath(surface); local != "" {
+				source = "local"
+			}
+		}
+		_, active := activeSet[surface.Slug]
+		entries = append(entries, SurfaceStatus{
+			Surface:   surface,
+			Installed: installed,
+			Active:    active,
+			Source:    source,
+			Path:      path,
+		})
+	}
+
+	return entries, nil
+}
+
+func (m *Manager) Active() ([]string, error) {
 	return m.loadActive()
+}
+
+func (m *Manager) ComposeFiles() ([]string, error) {
+	active, err := m.loadActive()
+	if err != nil {
+		return nil, err
+	}
+
+	files := make([]string, 0, len(active))
+	for _, slug := range active {
+		entry, err := m.find(slug)
+		if err != nil {
+			continue
+		}
+		file := filepath.Join(m.root, "surfaces", entry.RepoName, "docker-compose.yml")
+		if hasFile(file) {
+			files = append(files, file)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func (m *Manager) Install(slug string) (Surface, string, error) {
+	entry, err := m.find(slug)
+	if err != nil {
+		return Surface{}, "", err
+	}
+
+	target := filepath.Join(m.root, "surfaces", entry.RepoName)
+	if hasFile(filepath.Join(target, "docker-compose.yml")) {
+		return entry, "installed", nil
+	}
+	if pathExists(target) {
+		return Surface{}, "", fmt.Errorf("target path already exists and is not a managed surface: %s", target)
+	}
+
+	source, sourceLabel, err := m.installSource(entry)
+	if err != nil {
+		return Surface{}, "", err
+	}
+
+	args := []string{"-C", m.root}
+	if sourceLabel == "local" {
+		args = append(args, "-c", "protocol.file.allow=always")
+	}
+	args = append(args, "submodule", "add", source, filepath.Join("surfaces", entry.RepoName))
+	if err := run("git", args...); err != nil {
+		return Surface{}, "", err
+	}
+
+	if err := run("git", "-C", m.root, "submodule", "update", "--init", "--recursive", filepath.Join("surfaces", entry.RepoName)); err != nil {
+		return Surface{}, "", err
+	}
+
+	if err := initEnv(filepath.Join(target, ".env.example"), filepath.Join(target, ".env")); err != nil {
+		return Surface{}, "", err
+	}
+
+	return entry, sourceLabel, nil
+}
+
+func (m *Manager) Remove(slug string) (Surface, error) {
+	entry, err := m.find(slug)
+	if err != nil {
+		return Surface{}, err
+	}
+
+	_ = m.Deactivate(slug)
+
+	rel := filepath.Join("surfaces", entry.RepoName)
+	target := filepath.Join(m.root, rel)
+	if !pathExists(target) {
+		return entry, nil
+	}
+
+	if err := run("git", "-C", m.root, "submodule", "deinit", "-f", "--", rel); err != nil {
+		return Surface{}, err
+	}
+	if err := run("git", "-C", m.root, "rm", "-f", rel); err != nil {
+		return Surface{}, err
+	}
+	_ = os.RemoveAll(filepath.Join(m.root, ".git", "modules", rel))
+	return entry, nil
 }
 
 func (m *Manager) Scaffold(name, module string) (string, string, error) {
@@ -67,14 +192,14 @@ func (m *Manager) Scaffold(name, module string) (string, string, error) {
 }
 
 func (m *Manager) Activate(name string) error {
-	slug := normalizeSurfaceName(name)
-	if slug == "" {
-		return fmt.Errorf("surface name is required")
+	entry, err := m.find(name)
+	if err != nil {
+		return err
 	}
 
-	target := filepath.Join(m.root, "surfaces", slug)
-	if info, err := os.Stat(target); err != nil || !info.IsDir() {
-		return fmt.Errorf("surface not found at %s", target)
+	target := filepath.Join(m.root, "surfaces", entry.RepoName)
+	if !hasFile(filepath.Join(target, "docker-compose.yml")) {
+		return fmt.Errorf("surface %q is not installed at %s", entry.Slug, target)
 	}
 
 	active, err := m.loadActive()
@@ -82,12 +207,12 @@ func (m *Manager) Activate(name string) error {
 		return err
 	}
 	for _, item := range active {
-		if item == slug {
+		if item == entry.Slug {
 			return nil
 		}
 	}
 
-	active = append(active, slug)
+	active = append(active, entry.Slug)
 	sort.Strings(active)
 	return m.writeActive(active)
 }
@@ -111,6 +236,45 @@ func (m *Manager) Deactivate(name string) error {
 		filtered = append(filtered, item)
 	}
 	return m.writeActive(filtered)
+}
+
+func (m *Manager) find(slug string) (Surface, error) {
+	slug = normalizeSurfaceName(slug)
+	if m.catalog == nil {
+		return Surface{}, fmt.Errorf("surface catalog is unavailable")
+	}
+	for _, surface := range m.catalog.Surfaces {
+		if surface.Slug == slug {
+			return surface, nil
+		}
+	}
+	return Surface{}, fmt.Errorf("surface %q not found in catalog", slug)
+}
+
+func (m *Manager) installSource(entry Surface) (string, string, error) {
+	if local := m.localSourcePath(entry); local != "" {
+		return local, "local", nil
+	}
+	if entry.RepoURL != "" {
+		return entry.RepoURL, "remote", nil
+	}
+	return "", "", errors.New("no install source available")
+}
+
+func (m *Manager) localSourcePath(entry Surface) string {
+	if devDir := os.Getenv("YGGDRASIL_SURFACES_DEV_DIR"); devDir != "" {
+		path := filepath.Join(devDir, entry.RepoName)
+		if isGitRepo(path) {
+			return path
+		}
+	}
+
+	sibling := filepath.Join(filepath.Dir(m.root), entry.RepoName)
+	if isGitRepo(sibling) {
+		return sibling
+	}
+
+	return ""
 }
 
 func copyTemplateDir(sourceRoot, targetRoot string, replacements map[string]string) error {
@@ -186,6 +350,23 @@ func initEnv(examplePath, envPath string) error {
 func hasFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func isGitRepo(path string) bool {
+	info, err := os.Stat(filepath.Join(path, ".git"))
+	return err == nil && (info.IsDir() || !info.IsDir())
+}
+
+func run(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func (m *Manager) loadActive() ([]string, error) {
