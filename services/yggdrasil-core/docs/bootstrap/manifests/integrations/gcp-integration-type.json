@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Bootstrap integration type for the GCP runtime and governance plugin.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-gcp",
+      "bootstrap_source": "integration-gcp",
       "provider": "gcp",
       "yggdrasil.io/catalog-domain": "gcp",
       "yggdrasil.io/catalog-section": "operations",

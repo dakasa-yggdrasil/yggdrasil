@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Default RabbitMQ runtime integration instance used for broker governance and day-2 operations.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-rabbitmq",
+      "bootstrap_source": "integration-rabbitmq",
       "provider": "rabbitmq"
     }
   },

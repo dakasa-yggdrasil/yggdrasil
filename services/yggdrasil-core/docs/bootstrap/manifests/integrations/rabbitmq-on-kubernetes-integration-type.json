@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Bootstrap integration type for the substrate-specific RabbitMQ on Kubernetes plugin.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-rabbitmq-on-kubernetes",
+      "bootstrap_source": "integration-rabbitmq-on-kubernetes",
       "provider": "rabbitmq",
       "yggdrasil.io/catalog-domain": "rabbitmq",
       "yggdrasil.io/catalog-section": "installations",

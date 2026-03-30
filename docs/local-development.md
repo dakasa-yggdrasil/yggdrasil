@@ -77,7 +77,7 @@ cd surfaces/yggdrasil-console && task up
 Depois de instalar uma integration:
 
 ```bash
-cd integrations/yggdrasil-integration-github && task up
+cd integrations/integration-github && task up
 ```
 
 Boas práticas do comportamento local:

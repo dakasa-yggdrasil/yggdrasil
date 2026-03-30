@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Default GitHub integration instance used by the core to dispatch workflows on behalf of the product runtime.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-github",
+      "bootstrap_source": "integration-github",
       "provider": "github"
     }
   },

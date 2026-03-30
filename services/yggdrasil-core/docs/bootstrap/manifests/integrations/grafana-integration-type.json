@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Bootstrap integration type for the Grafana runtime and governance plugin.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-grafana",
+      "bootstrap_source": "integration-grafana",
       "provider": "grafana",
       "yggdrasil.io/catalog-domain": "grafana",
       "yggdrasil.io/catalog-section": "operations",

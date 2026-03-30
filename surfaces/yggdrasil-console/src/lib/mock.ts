@@ -342,7 +342,7 @@ export function mockCatalogDiscovery(): CatalogDiscoveryResponse {
         domain: "rabbitmq",
         section: "operations",
         entry: "api",
-        repository: "https://github.com/dakasa-yggdrasil/yggdrasil-integration-rabbitmq",
+        repository: "https://github.com/dakasa-yggdrasil/integration-rabbitmq",
         registration_status: "registered",
         registered_manifest: {
           id: "it-rabbitmq",
@@ -353,7 +353,7 @@ export function mockCatalogDiscovery(): CatalogDiscoveryResponse {
         },
         metadata: {
           source: "github",
-          topics: ["yggdrasil-integration"],
+          topics: ["integration", "yggdrasil-plugin"],
         },
       },
       {

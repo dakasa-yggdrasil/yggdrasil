@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Default Grafana runtime integration instance used for dashboards, datasources, and folders.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-grafana",
+      "bootstrap_source": "integration-grafana",
       "provider": "grafana"
     }
   },

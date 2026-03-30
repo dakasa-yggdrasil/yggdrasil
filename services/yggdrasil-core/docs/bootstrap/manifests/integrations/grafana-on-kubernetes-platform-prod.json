@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Default Grafana on Kubernetes integration instance used to generate Grafana products.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-grafana-on-kubernetes",
+      "bootstrap_source": "integration-grafana-on-kubernetes",
       "provider": "grafana"
     }
   },

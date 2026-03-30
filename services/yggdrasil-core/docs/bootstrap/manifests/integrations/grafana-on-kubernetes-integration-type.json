@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Bootstrap integration type for the Grafana on Kubernetes installation plugin.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-grafana-on-kubernetes",
+      "bootstrap_source": "integration-grafana-on-kubernetes",
       "provider": "grafana",
       "yggdrasil.io/catalog-domain": "grafana",
       "yggdrasil.io/catalog-section": "installations",

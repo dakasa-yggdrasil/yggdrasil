@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Bootstrap integration type for the Kubernetes target plugin used to apply and observe installation objects.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-kubernetes",
+      "bootstrap_source": "integration-kubernetes",
       "provider": "kubernetes",
       "yggdrasil.io/catalog-domain": "kubernetes",
       "yggdrasil.io/catalog-section": "operations",

@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Default Kubernetes target integration instance used by product installations.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-kubernetes",
+      "bootstrap_source": "integration-kubernetes",
       "provider": "kubernetes"
     }
   },

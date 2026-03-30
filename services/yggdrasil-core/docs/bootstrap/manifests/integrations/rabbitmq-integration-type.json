@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Bootstrap integration type for the RabbitMQ runtime and governance plugin.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-rabbitmq",
+      "bootstrap_source": "integration-rabbitmq",
       "provider": "rabbitmq",
       "yggdrasil.io/catalog-domain": "rabbitmq",
       "yggdrasil.io/catalog-section": "operations",

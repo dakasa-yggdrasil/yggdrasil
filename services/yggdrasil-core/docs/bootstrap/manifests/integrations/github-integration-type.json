@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Bootstrap integration type for the GitHub runtime and governance plugin.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-github",
+      "bootstrap_source": "integration-github",
       "provider": "github",
       "yggdrasil.io/catalog-domain": "github",
       "yggdrasil.io/catalog-section": "operations",

@@ -6,7 +6,7 @@
     "namespace": "global",
     "description": "Default GCP integration instance used by the core for product and workflow operations.",
     "labels": {
-      "bootstrap_source": "yggdrasil-integration-gcp",
+      "bootstrap_source": "integration-gcp",
       "provider": "gcp"
     }
   },

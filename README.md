@@ -140,7 +140,7 @@ cd surfaces/yggdrasil-console && task up
 E, se uma integration estiver instalada:
 
 ```bash
-cd integrations/yggdrasil-integration-github && task up
+cd integrations/integration-github && task up
 ```
 
 Cada slice sobe só o que precisa, mas reaproveita a mesma infraestrutura compartilhada.
