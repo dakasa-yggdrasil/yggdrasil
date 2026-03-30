@@ -3,12 +3,6 @@ version: "3"
 vars:
   PROJECT_NAME: yggdrasil-dev
   SERVICE_NAME: __SURFACE_NAME__
-  COMPOSE_ARGS: >-
-    --env-file ../../.env
-    --env-file ./.env
-    -f ../../dev/compose/infra.yml
-    -f ../../services/yggdrasil-core/docker-compose.yml
-    -f ./docker-compose.yml
 
 tasks:
   env:init:
@@ -21,39 +15,39 @@ tasks:
   up:
     deps: [env:init]
     cmds:
-      - docker compose --project-name {{.PROJECT_NAME}} {{.COMPOSE_ARGS}} up -d {{.SERVICE_NAME}}
+      - sh -lc 'ROOT="${YGGDRASIL_WORKSPACE_ROOT:-../../}"; SURFACE_SOURCE_DIR="$PWD" docker compose --project-name {{.PROJECT_NAME}} --env-file "$ROOT/.env" --env-file ./.env -f "$ROOT/dev/compose/infra.yml" -f "$ROOT/services/yggdrasil-core/docker-compose.yml" -f ./docker-compose.yml up -d {{.SERVICE_NAME}}'
 
   down:
     deps: [env:init]
     cmds:
-      - docker compose --project-name {{.PROJECT_NAME}} {{.COMPOSE_ARGS}} stop {{.SERVICE_NAME}}
+      - sh -lc 'ROOT="${YGGDRASIL_WORKSPACE_ROOT:-../../}"; SURFACE_SOURCE_DIR="$PWD" docker compose --project-name {{.PROJECT_NAME}} --env-file "$ROOT/.env" --env-file ./.env -f "$ROOT/dev/compose/infra.yml" -f "$ROOT/services/yggdrasil-core/docker-compose.yml" -f ./docker-compose.yml stop {{.SERVICE_NAME}}'
 
   restart:
     deps: [env:init]
     cmds:
-      - docker compose --project-name {{.PROJECT_NAME}} {{.COMPOSE_ARGS}} restart {{.SERVICE_NAME}}
+      - sh -lc 'ROOT="${YGGDRASIL_WORKSPACE_ROOT:-../../}"; SURFACE_SOURCE_DIR="$PWD" docker compose --project-name {{.PROJECT_NAME}} --env-file "$ROOT/.env" --env-file ./.env -f "$ROOT/dev/compose/infra.yml" -f "$ROOT/services/yggdrasil-core/docker-compose.yml" -f ./docker-compose.yml restart {{.SERVICE_NAME}}'
 
   logs:
     deps: [env:init]
     cmds:
-      - docker compose --project-name {{.PROJECT_NAME}} {{.COMPOSE_ARGS}} logs -f {{.SERVICE_NAME}}
+      - sh -lc 'ROOT="${YGGDRASIL_WORKSPACE_ROOT:-../../}"; SURFACE_SOURCE_DIR="$PWD" docker compose --project-name {{.PROJECT_NAME}} --env-file "$ROOT/.env" --env-file ./.env -f "$ROOT/dev/compose/infra.yml" -f "$ROOT/services/yggdrasil-core/docker-compose.yml" -f ./docker-compose.yml logs -f {{.SERVICE_NAME}}'
 
   ps:
     deps: [env:init]
     cmds:
-      - docker compose --project-name {{.PROJECT_NAME}} {{.COMPOSE_ARGS}} ps
+      - sh -lc 'ROOT="${YGGDRASIL_WORKSPACE_ROOT:-../../}"; SURFACE_SOURCE_DIR="$PWD" docker compose --project-name {{.PROJECT_NAME}} --env-file "$ROOT/.env" --env-file ./.env -f "$ROOT/dev/compose/infra.yml" -f "$ROOT/services/yggdrasil-core/docker-compose.yml" -f ./docker-compose.yml ps'
 
   config:
     deps: [env:init]
     cmds:
-      - docker compose --project-name {{.PROJECT_NAME}} {{.COMPOSE_ARGS}} config >/dev/null
+      - sh -lc 'ROOT="${YGGDRASIL_WORKSPACE_ROOT:-../../}"; SURFACE_SOURCE_DIR="$PWD" docker compose --project-name {{.PROJECT_NAME}} --env-file "$ROOT/.env" --env-file ./.env -f "$ROOT/dev/compose/infra.yml" -f "$ROOT/services/yggdrasil-core/docker-compose.yml" -f ./docker-compose.yml config >/dev/null'
 
   shell:
     deps: [env:init]
     cmds:
-      - docker compose --project-name {{.PROJECT_NAME}} {{.COMPOSE_ARGS}} exec {{.SERVICE_NAME}} sh
+      - sh -lc 'ROOT="${YGGDRASIL_WORKSPACE_ROOT:-../../}"; SURFACE_SOURCE_DIR="$PWD" docker compose --project-name {{.PROJECT_NAME}} --env-file "$ROOT/.env" --env-file ./.env -f "$ROOT/dev/compose/infra.yml" -f "$ROOT/services/yggdrasil-core/docker-compose.yml" -f ./docker-compose.yml exec {{.SERVICE_NAME}} sh'
 
   test:
     deps: [env:init]
     cmds:
-      - docker compose --project-name {{.PROJECT_NAME}} {{.COMPOSE_ARGS}} run --rm {{.SERVICE_NAME}} sh -lc "/usr/local/go/bin/go test ./..."
+      - sh -lc 'ROOT="${YGGDRASIL_WORKSPACE_ROOT:-../../}"; SURFACE_SOURCE_DIR="$PWD" docker compose --project-name {{.PROJECT_NAME}} --env-file "$ROOT/.env" --env-file ./.env -f "$ROOT/dev/compose/infra.yml" -f "$ROOT/services/yggdrasil-core/docker-compose.yml" -f ./docker-compose.yml run --rm {{.SERVICE_NAME}} sh -lc "/usr/local/go/bin/go test ./..."'

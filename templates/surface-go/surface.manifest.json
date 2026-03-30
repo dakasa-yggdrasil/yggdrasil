@@ -13,7 +13,7 @@
   "spec": {
     "category": "api",
     "owners": ["team:platform"],
-    "replaces": ["api"],
+    "replaces": [],
     "integration_binding": "core_only",
     "runtime": {
       "kind": "http_api",

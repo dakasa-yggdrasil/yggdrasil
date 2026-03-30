@@ -10,7 +10,7 @@ services:
     ports:
       - "${SURFACE_PORT}:${SURFACE_PORT}"
     volumes:
-      - ../../surfaces/__SURFACE_NAME__:/workspace
+      - ${SURFACE_SOURCE_DIR}:/workspace
       - __SURFACE_NAME__-go-mod:/go/pkg/mod
       - __SURFACE_NAME__-go-build:/root/.cache/go-build
     depends_on:
