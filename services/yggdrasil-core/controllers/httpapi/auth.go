@@ -17,6 +17,17 @@ type authLoginResponse struct {
 	Token        string             `json:"token"`
 }
 
+type authThirdPartyLoginResponse struct {
+	Collaborator model.Collaborator       `json:"collaborator"`
+	Identity     model.ThirdPartyIdentity `json:"identity"`
+	Session      model.AuthSession        `json:"session"`
+	Token        string                   `json:"token"`
+}
+
+type thirdPartyIdentitiesResponse struct {
+	Identities []model.ThirdPartyIdentity `json:"identities"`
+}
+
 func (s *Server) handleAuthPasswordUpsert(w http.ResponseWriter, r *http.Request) {
 	var req model.UpsertPasswordCredentialRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -58,6 +69,34 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	writeAuthCookie(w, token, session.ExpiresAt)
 	writeJSON(w, http.StatusOK, authLoginResponse{
 		Collaborator: collaborator,
+		Session:      session,
+		Token:        token,
+	})
+}
+
+func (s *Server) handleAuthThirdPartyLogin(w http.ResponseWriter, r *http.Request) {
+	var req model.LoginWithThirdPartyIdentityRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	req.SessionMetadata = mergeAuthMetadata(req.SessionMetadata, r)
+	collaborator, identity, session, token, err := repository.AuthenticateWithThirdPartyIdentity(
+		r.Context(),
+		s.db,
+		req,
+		authSessionTTL(),
+	)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeAuthCookie(w, token, session.ExpiresAt)
+	writeJSON(w, http.StatusOK, authThirdPartyLoginResponse{
+		Collaborator: collaborator,
+		Identity:     identity,
 		Session:      session,
 		Token:        token,
 	})
@@ -111,6 +150,55 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": false,
 		"session":       session,
+	})
+}
+
+func (s *Server) handleThirdPartyIdentityList(w http.ResponseWriter, r *http.Request) {
+	identities, err := repository.ListThirdPartyIdentities(r.Context(), s.db, model.ListThirdPartyIdentitiesRequest{
+		CollaboratorID: queryString(r, "collaborator_id"),
+		Provider:       queryString(r, "provider"),
+		Status:         queryString(r, "status"),
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, thirdPartyIdentitiesResponse{Identities: identities})
+}
+
+func (s *Server) handleThirdPartyIdentityUpsert(w http.ResponseWriter, r *http.Request) {
+	var req model.UpsertThirdPartyIdentityRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	identity, collaborator, err := repository.UpsertThirdPartyIdentity(r.Context(), s.db, req)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"identity":     identity,
+		"collaborator": collaborator,
+	})
+}
+
+func (s *Server) handleThirdPartyIdentityDelete(w http.ResponseWriter, r *http.Request) {
+	identity, collaborator, err := repository.DeleteThirdPartyIdentity(r.Context(), s.db, model.DeleteThirdPartyIdentityRequest{
+		Provider: r.PathValue("provider"),
+		Subject:  r.PathValue("subject"),
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"identity":     identity,
+		"collaborator": collaborator,
 	})
 }
 

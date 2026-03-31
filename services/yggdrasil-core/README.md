@@ -165,12 +165,17 @@ The worker now stores:
 - `teams`
 - `team_memberships`
 - `collaborator_password_credentials`
+- `collaborator_third_party_identities`
 - `auth_sessions`
 
 The direct core auth endpoints are:
 
 - `POST /api/v1/auth/passwords`
 - `POST /api/v1/auth/login`
+- `POST /api/v1/auth/third-party/login`
+- `GET /api/v1/auth/third-party-identities`
+- `POST /api/v1/auth/third-party-identities`
+- `DELETE /api/v1/auth/third-party-identities/{provider}/{subject}`
 - `GET /api/v1/auth/session`
 - `POST /api/v1/auth/logout`
 
@@ -194,6 +199,7 @@ Additional direct core endpoints now include:
 The intended split is:
 
 - `yggdrasil-core` owns credential verification and session persistence
+- `yggdrasil-core` owns third-party identity links and external session issuance
 - `yggdrasil-auth-surface` stays a thin collaborator-facing edge that proxies login/session/logout
 
 The intended authorization flow is:

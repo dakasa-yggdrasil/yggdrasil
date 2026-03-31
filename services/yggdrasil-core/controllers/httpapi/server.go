@@ -130,6 +130,10 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("GET /healthz", server.handleHealthz)
 	mux.HandleFunc("POST /api/v1/auth/passwords", server.handleAuthPasswordUpsert)
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleAuthLogin)
+	mux.HandleFunc("POST /api/v1/auth/third-party/login", server.handleAuthThirdPartyLogin)
+	mux.HandleFunc("GET /api/v1/auth/third-party-identities", server.handleThirdPartyIdentityList)
+	mux.HandleFunc("POST /api/v1/auth/third-party-identities", server.handleThirdPartyIdentityUpsert)
+	mux.HandleFunc("DELETE /api/v1/auth/third-party-identities/{provider}/{subject}", server.handleThirdPartyIdentityDelete)
 	mux.HandleFunc("GET /api/v1/auth/session", server.handleAuthSession)
 	mux.HandleFunc("POST /api/v1/auth/logout", server.handleAuthLogout)
 	mux.HandleFunc("GET /api/v1/integration-catalog", server.handleIntegrationCatalogList)
@@ -168,6 +172,9 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/console/teams", server.handleTeamCreate)
 	mux.HandleFunc("GET /api/v1/console/team-memberships", server.handleTeamMembershipList)
 	mux.HandleFunc("POST /api/v1/console/team-memberships", server.handleTeamMembershipUpsert)
+	mux.HandleFunc("GET /api/v1/console/auth/third-party-identities", server.handleThirdPartyIdentityList)
+	mux.HandleFunc("POST /api/v1/console/auth/third-party-identities", server.handleThirdPartyIdentityUpsert)
+	mux.HandleFunc("DELETE /api/v1/console/auth/third-party-identities/{provider}/{subject}", server.handleThirdPartyIdentityDelete)
 	mux.HandleFunc("GET /api/v1/console/products", server.handleProductList)
 	mux.HandleFunc("POST /api/v1/console/products", server.handleProductCreate)
 	mux.HandleFunc("GET /api/v1/console/secrets", server.handleManagedSecretList)
@@ -757,10 +764,13 @@ func httpStatusFromError(err error) int {
 		errors.Is(err, repository.ErrAuthSessionExpired),
 		errors.Is(err, repository.ErrPasswordCredentialNotFound):
 		return http.StatusUnauthorized
+	case errors.Is(err, repository.ErrThirdPartyIdentityConflict):
+		return http.StatusConflict
 	case errors.Is(err, repository.ErrManifestNotFound),
 		errors.Is(err, repository.ErrCollaboratorNotFound),
 		errors.Is(err, repository.ErrTeamNotFound),
-		errors.Is(err, repository.ErrManagedSecretNotFound):
+		errors.Is(err, repository.ErrManagedSecretNotFound),
+		errors.Is(err, repository.ErrThirdPartyIdentityNotFound):
 		return http.StatusNotFound
 	}
 

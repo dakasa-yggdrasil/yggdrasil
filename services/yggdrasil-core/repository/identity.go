@@ -307,6 +307,43 @@ func GetCollaboratorByThirdPartyLogin(ctx context.Context, db *sql.DB, provider,
 		ctx,
 		`
 			SELECT
+				c.id,
+				c.slug,
+				c.status,
+				c.display_name,
+				c.primary_email,
+				c.manager_id,
+				c.primary_team_id,
+				c.personal_data,
+				c.employment_data,
+				c.third_party_identities,
+				c.traits,
+				c.metadata,
+				c.created_at,
+				c.updated_at
+			FROM public.collaborator_third_party_identities tpi
+			JOIN public.collaborators c ON c.id = tpi.collaborator_id
+			WHERE tpi.provider = $1
+				AND tpi.login = $2
+			ORDER BY tpi.created_at ASC
+			LIMIT 1
+		`,
+		provider,
+		login,
+	)
+
+	collaborator, err := scanCollaborator(row)
+	if err == nil {
+		return collaborator, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return model.Collaborator{}, err
+	}
+
+	row = db.QueryRowContext(
+		ctx,
+		`
+			SELECT
 				id,
 				slug,
 				status,
@@ -330,7 +367,7 @@ func GetCollaboratorByThirdPartyLogin(ctx context.Context, db *sql.DB, provider,
 		login,
 	)
 
-	collaborator, err := scanCollaborator(row)
+	collaborator, err = scanCollaborator(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.Collaborator{}, ErrCollaboratorNotFound

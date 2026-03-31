@@ -204,4 +204,42 @@ payload = json.load(sys.stdin)
 assert payload["authenticated"] is False
 ' <<<"${logout_response}"
 
+external_subject="github-smoke-${slug_suffix}"
+external_login="smoke-gh-${slug_suffix}"
+
+echo "Logging in through auth surface with external identity..."
+third_party_login_response="$(curl -fsS \
+  -c "${cookie_jar}" \
+  -X POST \
+  -H "Content-Type: application/json" \
+  "${auth_url}/api/v1/auth/third-party/login" \
+  -d "$(cat <<JSON
+{"provider":"github","subject":"${external_subject}","login":"${external_login}","email":"${collaborator_email}","display_name":"Smoke GitHub User","auto_link_by_email":true,"claims":{"organization":"dakasa-yggdrasil"}}
+JSON
+)")"
+
+third_party_token="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"${third_party_login_response}")"
+if [[ -z "${third_party_token}" ]]; then
+  echo "third-party login did not return a session token" >&2
+  exit 1
+fi
+
+curl -fsS "${core_url}/api/v1/auth/third-party-identities?collaborator_id=${collaborator_id}" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+assert any(item["provider"] == "github" and item["subject"].startswith("github-smoke-") for item in payload["identities"])
+'
+
+echo "Resolving external-auth session through auth surface..."
+third_party_session_response="$(curl -fsS -b "${cookie_jar}" "${auth_url}/api/v1/auth/session")"
+
+python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+assert payload["authenticated"] is True
+assert payload["collaborator"]["primary_email"].startswith("smoke-")
+assert payload["session"]["metadata"]["auth_method"] == "third_party"
+assert payload["session"]["metadata"]["provider"] == "github"
+' <<<"${third_party_session_response}"
+
 echo "Smoke checks passed."
