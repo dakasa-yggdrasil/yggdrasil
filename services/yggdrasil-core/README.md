@@ -173,9 +173,15 @@ The direct core auth endpoints are:
 - `POST /api/v1/auth/passwords`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/third-party/login`
+- `GET /api/v1/auth/third-party/start/{provider}`
+- `GET /api/v1/auth/third-party/callback/{provider}`
 - `GET /api/v1/auth/third-party-identities`
 - `POST /api/v1/auth/third-party-identities`
 - `DELETE /api/v1/auth/third-party-identities/{provider}/{subject}`
+- `GET /api/v1/auth/providers`
+- `POST /api/v1/auth/providers`
+- `GET /api/v1/auth/providers/{provider}`
+- `DELETE /api/v1/auth/providers/{provider}`
 - `GET /api/v1/auth/session`
 - `POST /api/v1/auth/logout`
 
@@ -200,6 +206,7 @@ The intended split is:
 
 - `yggdrasil-core` owns credential verification and session persistence
 - `yggdrasil-core` owns third-party identity links and external session issuance
+- `yggdrasil-core` owns third-party auth provider configuration and browser OAuth/OIDC flow
 - `yggdrasil-auth-surface` stays a thin collaborator-facing edge that proxies login/session/logout
 
 The intended authorization flow is:

@@ -1,12 +1,16 @@
 package httpapi
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/dakasa-co/yggdrasil-core/internal/coreauth"
 	"github.com/dakasa-co/yggdrasil-core/model"
 	"github.com/dakasa-co/yggdrasil-core/repository"
 )
@@ -26,6 +30,10 @@ type authThirdPartyLoginResponse struct {
 
 type thirdPartyIdentitiesResponse struct {
 	Identities []model.ThirdPartyIdentity `json:"identities"`
+}
+
+type thirdPartyAuthProvidersResponse struct {
+	Providers []model.ThirdPartyAuthProvider `json:"providers"`
 }
 
 func (s *Server) handleAuthPasswordUpsert(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +108,124 @@ func (s *Server) handleAuthThirdPartyLogin(w http.ResponseWriter, r *http.Reques
 		Session:      session,
 		Token:        token,
 	})
+}
+
+func (s *Server) handleAuthThirdPartyStart(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.resolveAuthProvider(r.Context(), r.PathValue("provider"))
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	redirectTo := queryString(r, "redirect_to")
+	state, err := coreauth.NewThirdPartyState(provider.Name, normalizePostAuthRedirect(redirectTo))
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	stateToken, err := coreauth.SignThirdPartyState(authThirdPartyStateSecret(), state)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	redirectURI := authThirdPartyCallbackURL(r, provider.Name)
+	authURL, err := buildThirdPartyAuthorizeURL(provider, redirectURI, state.Nonce)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeThirdPartyStateCookie(w, stateToken)
+	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+func (s *Server) handleAuthThirdPartyCallback(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.resolveAuthProvider(r.Context(), r.PathValue("provider"))
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	stateCookie, err := r.Cookie(authThirdPartyStateCookieName())
+	if err != nil {
+		writeMappedError(w, fmt.Errorf("third-party auth state cookie is required"))
+		return
+	}
+	state, err := coreauth.VerifyThirdPartyState(authThirdPartyStateSecret(), stateCookie.Value)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	if state.Provider != provider.Name {
+		writeMappedError(w, fmt.Errorf("third-party auth state provider mismatch"))
+		return
+	}
+	if strings.TrimSpace(r.URL.Query().Get("state")) != state.Nonce {
+		writeMappedError(w, fmt.Errorf("third-party auth state mismatch"))
+		return
+	}
+	if providerError := strings.TrimSpace(r.URL.Query().Get("error")); providerError != "" {
+		writeMappedError(w, fmt.Errorf("third-party provider returned error %q", providerError))
+		return
+	}
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if code == "" {
+		writeMappedError(w, fmt.Errorf("third-party authorization code is required"))
+		return
+	}
+
+	redirectURI := authThirdPartyCallbackURL(r, provider.Name)
+	accessToken, _, err := coreauth.ExchangeAuthorizationCode(r.Context(), http.DefaultClient, provider, code, redirectURI)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	profile, err := coreauth.FetchOAuthProfile(r.Context(), http.DefaultClient, provider, accessToken)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	collaborator, identity, session, token, err := repository.AuthenticateWithThirdPartyIdentity(
+		r.Context(),
+		s.db,
+		model.LoginWithThirdPartyIdentityRequest{
+			Provider:        provider.Name,
+			Subject:         profile.Subject,
+			Login:           profile.Login,
+			Email:           profile.Email,
+			DisplayName:     profile.DisplayName,
+			ProfileURL:      profile.ProfileURL,
+			AvatarURL:       profile.AvatarURL,
+			Claims:          profile.Claims,
+			AutoLinkByEmail: provider.AutoLinkByEmail,
+			SessionMetadata: mergeAuthMetadata(map[string]any{
+				"auth_flow": "browser_callback",
+				"provider":  provider.Name,
+			}, r),
+		},
+		authSessionTTL(),
+	)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	clearThirdPartyStateCookie(w)
+	writeAuthCookie(w, token, session.ExpiresAt)
+
+	redirectTo := normalizePostAuthRedirect(state.RedirectTo)
+	if queryBool(r, "response_as_json") {
+		writeJSON(w, http.StatusOK, authThirdPartyLoginResponse{
+			Collaborator: collaborator,
+			Identity:     identity,
+			Session:      session,
+			Token:        token,
+		})
+		return
+	}
+	http.Redirect(w, r, redirectTo, http.StatusFound)
 }
 
 func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +326,54 @@ func (s *Server) handleThirdPartyIdentityDelete(w http.ResponseWriter, r *http.R
 		"identity":     identity,
 		"collaborator": collaborator,
 	})
+}
+
+func (s *Server) handleThirdPartyAuthProviderList(w http.ResponseWriter, r *http.Request) {
+	providers, err := repository.ListThirdPartyAuthProviders(r.Context(), s.db, model.ListThirdPartyAuthProvidersRequest{
+		Type:   queryString(r, "type"),
+		Status: queryString(r, "status"),
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, thirdPartyAuthProvidersResponse{Providers: providers})
+}
+
+func (s *Server) handleThirdPartyAuthProviderGet(w http.ResponseWriter, r *http.Request) {
+	provider, err := repository.GetThirdPartyAuthProvider(r.Context(), s.db, model.GetThirdPartyAuthProviderRequest{
+		Name: r.PathValue("provider"),
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"provider": provider})
+}
+
+func (s *Server) handleThirdPartyAuthProviderUpsert(w http.ResponseWriter, r *http.Request) {
+	var req model.UpsertThirdPartyAuthProviderRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	provider, err := repository.UpsertThirdPartyAuthProvider(r.Context(), s.db, req)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"provider": provider})
+}
+
+func (s *Server) handleThirdPartyAuthProviderDelete(w http.ResponseWriter, r *http.Request) {
+	provider, err := repository.DeleteThirdPartyAuthProvider(r.Context(), s.db, model.DeleteThirdPartyAuthProviderRequest{
+		Name: r.PathValue("provider"),
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"provider": provider})
 }
 
 func writeAuthCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
@@ -306,6 +480,177 @@ func authSessionTTL() time.Duration {
 	return time.Duration(hours) * time.Hour
 }
 
+func authThirdPartyStateSecret() string {
+	if value := strings.TrimSpace(os.Getenv("AUTH_THIRD_PARTY_STATE_SECRET")); value != "" {
+		return value
+	}
+	return "yggdrasil-dev-third-party-state-secret"
+}
+
+func authThirdPartyStateCookieName() string {
+	return "yggdrasil_third_party_state"
+}
+
+func writeThirdPartyStateCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     authThirdPartyStateCookieName(),
+		Value:    token,
+		Path:     "/api/v1/auth/third-party/",
+		Expires:  time.Now().UTC().Add(10 * time.Minute),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   authSessionCookieSecure(),
+		Domain:   authSessionCookieDomain(),
+	})
+}
+
+func clearThirdPartyStateCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     authThirdPartyStateCookieName(),
+		Value:    "",
+		Path:     "/api/v1/auth/third-party/",
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0).UTC(),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   authSessionCookieSecure(),
+		Domain:   authSessionCookieDomain(),
+	})
+}
+
+func authSurfaceBaseURL(r *http.Request) string {
+	if value := strings.TrimSpace(r.Header.Get("X-Yggdrasil-Surface-Base-URL")); value != "" {
+		return strings.TrimRight(value, "/")
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); forwarded != "" {
+		scheme = forwarded
+	}
+	host := strings.TrimSpace(r.Host)
+	if host == "" {
+		host = "127.0.0.1:9090"
+	}
+	return scheme + "://" + host
+}
+
+func authThirdPartyCallbackURL(r *http.Request, provider string) string {
+	return authSurfaceBaseURL(r) + "/api/v1/auth/third-party/callback/" + url.PathEscape(strings.TrimSpace(provider))
+}
+
+func normalizePostAuthRedirect(value string) string {
+	value = strings.TrimSpace(value)
+	switch {
+	case value == "":
+		return "/"
+	case strings.HasPrefix(value, "/"):
+		return value
+	case strings.HasPrefix(value, "http://"), strings.HasPrefix(value, "https://"):
+		return value
+	default:
+		return "/"
+	}
+}
+
+func buildThirdPartyAuthorizeURL(provider coreauth.OAuthResolvedProvider, redirectURI string, nonce string) (string, error) {
+	authURL, err := url.Parse(provider.AuthorizeURL)
+	if err != nil {
+		return "", fmt.Errorf("parse provider authorize_url: %w", err)
+	}
+	query := authURL.Query()
+	query.Set("response_type", "code")
+	query.Set("client_id", provider.ClientID)
+	query.Set("redirect_uri", redirectURI)
+	query.Set("state", nonce)
+	if len(provider.Scopes) > 0 {
+		query.Set("scope", strings.Join(provider.Scopes, " "))
+	}
+	authURL.RawQuery = query.Encode()
+	return authURL.String(), nil
+}
+
+func (s *Server) resolveAuthProvider(ctx context.Context, providerName string) (coreauth.OAuthResolvedProvider, error) {
+	provider, err := repository.GetThirdPartyAuthProvider(ctx, s.db, model.GetThirdPartyAuthProviderRequest{Name: providerName})
+	if err != nil {
+		return coreauth.OAuthResolvedProvider{}, err
+	}
+	if strings.ToLower(strings.TrimSpace(provider.Status)) != "active" {
+		return coreauth.OAuthResolvedProvider{}, fmt.Errorf("third-party auth provider %q is not active", provider.Name)
+	}
+
+	clientSecretAny, err := repository.ResolveSecretRef(ctx, s.db, provider.ClientSecretRef)
+	if err != nil {
+		return coreauth.OAuthResolvedProvider{}, err
+	}
+	clientSecret, err := coerceThirdPartyClientSecret(clientSecretAny)
+	if err != nil {
+		return coreauth.OAuthResolvedProvider{}, err
+	}
+
+	authorizeURL := provider.AuthorizeURL
+	tokenURL := provider.TokenURL
+	userInfoURL := provider.UserInfoURL
+	if strings.ToLower(strings.TrimSpace(provider.Type)) == "oidc" && provider.IssuerURL != "" &&
+		(authorizeURL == "" || tokenURL == "" || userInfoURL == "") {
+		discovery, err := coreauth.ResolveOIDCDiscovery(ctx, http.DefaultClient, provider.IssuerURL)
+		if err != nil {
+			return coreauth.OAuthResolvedProvider{}, err
+		}
+		if authorizeURL == "" {
+			authorizeURL = discovery.AuthorizationEndpoint
+		}
+		if tokenURL == "" {
+			tokenURL = discovery.TokenEndpoint
+		}
+		if userInfoURL == "" {
+			userInfoURL = discovery.UserInfoEndpoint
+		}
+	}
+
+	return coreauth.OAuthResolvedProvider{
+		Name:             provider.Name,
+		Type:             provider.Type,
+		AuthorizeURL:     authorizeURL,
+		TokenURL:         tokenURL,
+		UserInfoURL:      userInfoURL,
+		ClientID:         provider.ClientID,
+		ClientSecret:     clientSecret,
+		Scopes:           provider.Scopes,
+		AutoLinkByEmail:  provider.AutoLinkByEmail,
+		SubjectField:     provider.SubjectField,
+		LoginField:       provider.LoginField,
+		EmailField:       provider.EmailField,
+		DisplayNameField: provider.DisplayNameField,
+		AvatarURLField:   provider.AvatarURLField,
+		ProfileURLField:  provider.ProfileURLField,
+	}, nil
+}
+
+func coerceThirdPartyClientSecret(value any) (string, error) {
+	switch typed := value.(type) {
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return "", fmt.Errorf("third-party auth provider client secret is empty")
+		}
+		return typed, nil
+	case map[string]any:
+		if len(typed) == 1 {
+			for _, item := range typed {
+				return coerceThirdPartyClientSecret(item)
+			}
+		}
+	case map[string]string:
+		if len(typed) == 1 {
+			for _, item := range typed {
+				return coerceThirdPartyClientSecret(item)
+			}
+		}
+	}
+	return "", fmt.Errorf("third-party auth provider client secret must resolve to one scalar value")
+}
+
 func isAuthUnauthorizedError(err error) bool {
 	switch {
 	case err == nil:
@@ -314,7 +659,8 @@ func isAuthUnauthorizedError(err error) bool {
 		err == repository.ErrAuthSessionNotFound,
 		err == repository.ErrAuthSessionExpired,
 		err == repository.ErrPasswordCredentialNotFound,
-		err == repository.ErrCollaboratorNotFound:
+		err == repository.ErrCollaboratorNotFound,
+		err == repository.ErrThirdPartyIdentityNotFound:
 		return true
 	default:
 		return false

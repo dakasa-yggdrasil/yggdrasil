@@ -28,7 +28,9 @@ require_tool curl
 require_tool python3
 
 cookie_jar="$(mktemp)"
-trap 'rm -f "${cookie_jar}"' EXIT
+mock_provider_pid=""
+mock_provider_script=""
+trap 'rm -f "${cookie_jar}" "${mock_provider_script}"; if [[ -n "${mock_provider_pid}" ]]; then kill "${mock_provider_pid}" >/dev/null 2>&1 || true; fi' EXIT
 
 wait_for_url() {
   local url="$1"
@@ -241,5 +243,156 @@ assert payload["collaborator"]["primary_email"].startswith("smoke-")
 assert payload["session"]["metadata"]["auth_method"] == "third_party"
 assert payload["session"]["metadata"]["provider"] == "github"
 ' <<<"${third_party_session_response}"
+
+provider_secret_name="oidc-client-secret-${slug_suffix}"
+provider_name="oidc-smoke-${slug_suffix}"
+mock_provider_port=9494
+mock_provider_base_url="http://127.0.0.1:${mock_provider_port}"
+mock_provider_container_base_url="http://host.docker.internal:${mock_provider_port}"
+
+echo "Creating managed secret ${provider_secret_name} for OIDC provider..."
+curl -fsS \
+  -X POST \
+  -H "Content-Type: application/json" \
+  "${core_url}/api/v1/secrets" \
+  -d "$(cat <<JSON
+{"namespace":"global","name":"${provider_secret_name}","data":{"value":"smoke-oidc-client-secret"}}
+JSON
+)" >/dev/null
+
+echo "Registering OIDC provider ${provider_name}..."
+curl -fsS \
+  -X POST \
+  -H "Content-Type: application/json" \
+  "${core_url}/api/v1/auth/providers" \
+  -d "$(cat <<JSON
+{
+  "name": "${provider_name}",
+  "type": "oidc",
+  "display_name": "Smoke OIDC",
+  "authorize_url": "${mock_provider_base_url}/authorize",
+  "token_url": "${mock_provider_container_base_url}/token",
+  "userinfo_url": "${mock_provider_container_base_url}/userinfo",
+  "client_id": "smoke-client-id",
+  "client_secret_ref": "secret://global/${provider_secret_name}",
+  "auto_link_by_email": true,
+  "metadata": {"smoke_test": true}
+}
+JSON
+)" >/dev/null
+
+curl -fsS "${core_url}/api/v1/auth/providers/${provider_name}" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+assert payload["provider"]["name"].startswith("oidc-smoke-")
+assert payload["provider"]["type"] == "oidc"
+'
+
+mock_provider_script="$(mktemp)"
+cat > "${mock_provider_script}" <<PY
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlencode, urlparse
+import json
+
+SUBJECT = "oidc-subject-${slug_suffix}"
+LOGIN = "smoke-oidc-${slug_suffix}"
+EMAIL = "${collaborator_email}"
+NAME = "Smoke OIDC User"
+AVATAR = "https://example.com/avatar.png"
+PROFILE = "https://example.com/profile"
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args, **kwargs):
+        return
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/.well-known/openid-configuration":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "authorization_endpoint": "${mock_provider_base_url}/authorize",
+                "token_endpoint": "${mock_provider_container_base_url}/token",
+                "userinfo_endpoint": "${mock_provider_container_base_url}/userinfo"
+            }).encode())
+            return
+
+        if parsed.path == "/authorize":
+            query = parse_qs(parsed.query)
+            redirect_uri = query["redirect_uri"][0]
+            state = query["state"][0]
+            location = redirect_uri + ("&" if "?" in redirect_uri else "?") + urlencode({
+                "code": "smoke-auth-code",
+                "state": state,
+            })
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.end_headers()
+            return
+
+        if parsed.path == "/userinfo":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "sub": SUBJECT,
+                "preferred_username": LOGIN,
+                "email": EMAIL,
+                "name": NAME,
+                "picture": AVATAR,
+                "profile": PROFILE
+            }).encode())
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/token":
+            _ = self.rfile.read(int(self.headers.get("Content-Length", "0") or "0"))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "access_token": "smoke-access-token",
+                "token_type": "Bearer"
+            }).encode())
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
+HTTPServer(("127.0.0.1", ${mock_provider_port}), Handler).serve_forever()
+PY
+
+python3 "${mock_provider_script}" >/dev/null 2>&1 &
+mock_provider_pid=$!
+sleep 1
+
+echo "Completing browser OIDC flow through auth surface..."
+oidc_session_response="$(curl -fsS -L \
+  -c "${cookie_jar}" \
+  -b "${cookie_jar}" \
+  --get \
+  --data-urlencode "redirect_to=${auth_url}/api/v1/auth/session" \
+  "${auth_url}/api/v1/auth/third-party/start/${provider_name}")"
+
+python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+assert payload["authenticated"] is True
+assert payload["collaborator"]["primary_email"].startswith("smoke-")
+assert payload["session"]["metadata"]["auth_method"] == "third_party"
+assert payload["session"]["metadata"]["provider"].startswith("oidc-smoke-")
+' <<<"${oidc_session_response}"
+
+curl -fsS "${core_url}/api/v1/auth/third-party-identities?provider=${provider_name}" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+assert len(payload["identities"]) == 1
+assert payload["identities"][0]["email"].startswith("smoke-")
+'
 
 echo "Smoke checks passed."
