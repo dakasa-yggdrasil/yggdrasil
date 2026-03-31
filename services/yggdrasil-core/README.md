@@ -400,8 +400,9 @@ The core also exposes an explicit catalog API so consumers do not need to know l
 - section
 - entry
 
-Each entry includes the concrete `integration_type`, adapter metadata, current runtime state, and
-configured `integration_instance` summaries with derived health when available.
+Each entry includes the concrete `integration_type`, adapter metadata, a representative runtime
+state derived from configured instances, and `integration_instance` summaries with their own
+observed health when available.
 
 `integration.catalog.get` resolves one concrete catalog entry by:
 
@@ -1170,7 +1171,7 @@ When the core materializes an integration-backed component, it calls the integra
 The adapter returns raw Kubernetes objects, and the core persists the resulting materialized
 product spec together with component-level trace metadata.
 
-The core also persists observed adapter contract state for each `integration_type` under the
+The core persists observed adapter contract state for each `integration_instance` under the
 `describe_handshake` check. The current statuses are:
 
 - `healthy`
@@ -1184,9 +1185,9 @@ These states are queryable through:
 - `yggdrasil-core.integration.status.list`
 
 The core also derives a higher-level health view per `integration_instance`. For active instances,
-it mirrors the latest runtime status of the referenced `integration_type`; for instances without a
-recorded runtime check yet, it returns `unknown`; and for non-active instances it returns the
-declared manifest status such as `draft` or `disabled`.
+it mirrors the latest runtime status recorded for that instance; for instances without a recorded
+runtime check yet, it returns `unknown`; and for non-active instances it returns the declared
+manifest status such as `draft` or `disabled`.
 
 These views are queryable through:
 
@@ -1194,7 +1195,7 @@ These views are queryable through:
 - `yggdrasil-core.integration.instance_health.list`
 
 In addition, the worker now runs a periodic background sweep that rechecks active
-`integration_type` describe handshakes. The interval defaults to `60s` and can be overridden with
+`integration_instance` describe handshakes. The interval defaults to `60s` and can be overridden with
 `INTEGRATION_RUNTIME_MONITOR_INTERVAL_SECONDS`.
 
 After generation, the core also exposes two explicit installation RPC flows:

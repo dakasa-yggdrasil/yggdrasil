@@ -128,7 +128,12 @@ func buildIntegrationInstanceHealth(
 		return health, nil
 	}
 
-	runtimeState, err := repository.GetIntegrationRuntimeState(ctx, db, instanceSpec.TypeRef, checkKind)
+	runtimeState, err := repository.GetIntegrationRuntimeState(ctx, db, model.ManifestSelector{
+		ManifestID: instanceManifest.ID.String(),
+		Namespace:  instanceManifest.Metadata.Namespace,
+		Name:       instanceManifest.Metadata.Name,
+		Version:    &instanceManifest.Version,
+	}, checkKind)
 	if err != nil {
 		if errors.Is(err, repository.ErrIntegrationRuntimeStateNotFound) {
 			health.Status = integrationInstanceOverallStatus(declaredStatus, nil)
@@ -167,7 +172,12 @@ func preflightIntegrationInstanceHealth(
 		}
 	}
 
-	runtimeState, err := repository.GetIntegrationRuntimeState(ctx, db, instanceSpec.TypeRef, checkKind)
+	runtimeState, err := repository.GetIntegrationRuntimeState(ctx, db, model.ManifestSelector{
+		ManifestID: instanceManifest.ID.String(),
+		Namespace:  instanceManifest.Metadata.Namespace,
+		Name:       instanceManifest.Metadata.Name,
+		Version:    &instanceManifest.Version,
+	}, checkKind)
 	if err != nil {
 		if errors.Is(err, repository.ErrIntegrationRuntimeStateNotFound) {
 			return nil

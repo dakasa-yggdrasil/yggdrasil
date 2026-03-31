@@ -60,38 +60,73 @@ func runIntegrationRuntimeMonitorSweep(
 	logger *zap.Logger,
 ) {
 	manifests, err := repository.ListManifests(ctx, db, model.ListManifestFilters{
-		Kind:       "integration_type",
+		Kind:       "integration_instance",
 		ActiveOnly: true,
 	})
 	if err != nil {
 		if logger != nil {
-			logger.Warn("integration runtime monitor failed to list integration types", zap.Error(err))
+			logger.Warn("integration runtime monitor failed to list integration instances", zap.Error(err))
 		}
 		return
 	}
 
 	for _, manifestRecord := range manifests {
-		spec, err := manifestengine.ParseIntegrationTypeSpec(manifestRecord.Spec)
+		instanceSpec, err := manifestengine.ParseIntegrationInstanceSpec(manifestRecord.Spec)
 		if err != nil {
 			recordErr := fmt.Errorf(
-				"parse integration_type %s/%s for runtime monitor: %w",
+				"parse integration_instance %s/%s for runtime monitor: %w",
 				manifestRecord.Metadata.Namespace,
 				manifestRecord.Metadata.Name,
 				err,
 			)
-			_ = failIntegrationDescribeHandshake(
-				ctx,
-				db,
-				manifestRecord,
-				model.IntegrationRuntimeStatusContractMismatch,
-				recordErr,
-				map[string]any{
-					"integration_type": manifestReferenceFromRecord(manifestRecord),
-					"source":           "integration_runtime_monitor",
-				},
-			)
 			if logger != nil {
-				logger.Warn("integration runtime monitor found invalid integration_type manifest", zap.Error(recordErr))
+				logger.Warn("integration runtime monitor found invalid integration_instance manifest", zap.Error(recordErr))
+			}
+			continue
+		}
+
+		if err := hydrateIntegrationInstanceSecrets(ctx, db, &instanceSpec); err != nil {
+			if logger != nil {
+				logger.Warn(
+					"integration runtime monitor failed to hydrate integration instance secrets",
+					zap.String("namespace", manifestRecord.Metadata.Namespace),
+					zap.String("name", manifestRecord.Metadata.Name),
+					zap.Error(err),
+				)
+			}
+			continue
+		}
+
+		typeManifest, err := resolveManifestForKind(
+			ctx,
+			db,
+			"integration_type",
+			instanceSpec.TypeRef.ManifestID,
+			instanceSpec.TypeRef.Namespace,
+			instanceSpec.TypeRef.Name,
+			instanceSpec.TypeRef.Version,
+		)
+		if err != nil {
+			if logger != nil {
+				logger.Warn(
+					"integration runtime monitor failed to resolve integration type",
+					zap.String("namespace", manifestRecord.Metadata.Namespace),
+					zap.String("name", manifestRecord.Metadata.Name),
+					zap.Error(err),
+				)
+			}
+			continue
+		}
+
+		typeSpec, err := manifestengine.ParseIntegrationTypeSpec(typeManifest.Spec)
+		if err != nil {
+			if logger != nil {
+				logger.Warn(
+					"integration runtime monitor found invalid integration_type manifest",
+					zap.String("type_namespace", typeManifest.Metadata.Namespace),
+					zap.String("type_name", typeManifest.Metadata.Name),
+					zap.Error(err),
+				)
 			}
 			continue
 		}
@@ -101,8 +136,9 @@ func runIntegrationRuntimeMonitorSweep(
 			conn,
 			db,
 			manifestRecord,
-			model.IntegrationInstanceManifestSpec{},
-			spec,
+			typeManifest,
+			instanceSpec,
+			typeSpec,
 		); err != nil && logger != nil {
 			logger.Warn(
 				"integration runtime monitor handshake failed",

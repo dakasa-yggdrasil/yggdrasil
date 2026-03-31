@@ -13,8 +13,9 @@ const (
 	IntegrationInstanceHealthStatusUnknown = "unknown"
 )
 
-// IntegrationRuntimeState stores one observed operational check for an integration type.
+// IntegrationRuntimeState stores one observed operational check for an integration instance.
 type IntegrationRuntimeState struct {
+	IntegrationInstance ManifestReference `json:"integration_instance"`
 	IntegrationType ManifestReference `json:"integration_type"`
 	CheckKind       string            `json:"check_kind"`
 	Status          string            `json:"status"`
@@ -29,8 +30,8 @@ type IntegrationRuntimeState struct {
 
 // GetIntegrationRuntimeStateRequest fetches one observed integration runtime state.
 type GetIntegrationRuntimeStateRequest struct {
-	IntegrationType ManifestSelector `json:"integration_type"`
-	CheckKind       string           `json:"check_kind,omitempty"`
+	IntegrationInstance ManifestSelector `json:"integration_instance"`
+	CheckKind           string           `json:"check_kind,omitempty"`
 }
 
 // ListIntegrationRuntimeStatesRequest filters observed integration runtime states.

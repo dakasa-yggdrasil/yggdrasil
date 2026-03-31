@@ -678,7 +678,7 @@ func resolveIntegrationInstance(
 		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, err
 	}
 
-	if err := verifyResolvedIntegrationType(ctx, conn, db, typeManifest, instanceSpec, typeSpec); err != nil {
+	if err := verifyResolvedIntegrationType(ctx, conn, db, instanceManifest, typeManifest, instanceSpec, typeSpec); err != nil {
 		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, err
 	}
 

@@ -3,7 +3,6 @@ package message
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -55,15 +54,11 @@ func integrationCatalogList(
 			continue
 		}
 
-		runtimeState, err := maybeGetIntegrationTypeRuntimeState(ctx, db, typeManifest, req.CheckKind)
-		if err != nil {
-			return nil, err
-		}
-
 		instances, err := buildIntegrationCatalogInstances(ctx, db, typeManifest, instanceManifests, req.CheckKind)
 		if err != nil {
 			return nil, err
 		}
+		runtimeState := summarizeIntegrationCatalogEntryRuntimeState(instances)
 
 		entries = append(entries, model.IntegrationCatalogEntry{
 			Domain:          position.Domain,
@@ -73,7 +68,7 @@ func integrationCatalogList(
 			Description:     strings.TrimSpace(typeManifest.Metadata.Description),
 			Provider:        strings.ToLower(strings.TrimSpace(typeSpec.Provider)),
 			AdapterVersion:  strings.TrimSpace(typeSpec.Adapter.Version),
-			Status:          summarizeIntegrationCatalogEntryStatus(runtimeState, instances),
+			Status:          summarizeIntegrationCatalogEntryStatus(instances),
 			Labels:          cloneStringMap(typeManifest.Metadata.Labels),
 			Capabilities:    cloneStringSlice(typeSpec.Capabilities),
 			IntegrationType: manifestReferenceFromRecord(typeManifest),
@@ -227,27 +222,6 @@ func matchesIntegrationCatalogFilter(position integrationCatalogPosition, req mo
 	return true
 }
 
-func maybeGetIntegrationTypeRuntimeState(
-	ctx context.Context,
-	db *sql.DB,
-	typeManifest model.Manifest,
-	checkKind string,
-) (*model.IntegrationRuntimeState, error) {
-	state, err := repository.GetIntegrationRuntimeState(ctx, db, model.ManifestSelector{
-		ManifestID: typeManifest.ID.String(),
-		Namespace:  typeManifest.Metadata.Namespace,
-		Name:       typeManifest.Metadata.Name,
-		Version:    &typeManifest.Version,
-	}, checkKind)
-	if err != nil {
-		if errors.Is(err, repository.ErrIntegrationRuntimeStateNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &state, nil
-}
-
 func buildIntegrationCatalogInstances(
 	ctx context.Context,
 	db *sql.DB,
@@ -312,14 +286,8 @@ func integrationInstanceTargetsType(selector model.ManifestSelector, typeManifes
 	return true
 }
 
-func summarizeIntegrationCatalogEntryStatus(
-	runtimeState *model.IntegrationRuntimeState,
-	instances []model.IntegrationCatalogInstance,
-) string {
+func summarizeIntegrationCatalogEntryStatus(instances []model.IntegrationCatalogInstance) string {
 	if len(instances) == 0 {
-		if runtimeState != nil {
-			return strings.ToLower(strings.TrimSpace(runtimeState.Status))
-		}
 		return model.IntegrationCatalogEntryStatusUnconfigured
 	}
 
@@ -342,11 +310,42 @@ func summarizeIntegrationCatalogEntryStatus(
 		}
 	}
 
-	if runtimeState != nil && strings.TrimSpace(runtimeState.Status) != "" {
-		return strings.ToLower(strings.TrimSpace(runtimeState.Status))
+	return statuses[0]
+}
+
+func summarizeIntegrationCatalogEntryRuntimeState(
+	instances []model.IntegrationCatalogInstance,
+) *model.IntegrationRuntimeState {
+	if len(instances) == 0 {
+		return nil
 	}
 
-	return statuses[0]
+	for _, preferred := range []string{
+		model.IntegrationRuntimeStatusHealthy,
+		model.IntegrationInstanceHealthStatusUnknown,
+		model.IntegrationRuntimeStatusContractMismatch,
+		model.IntegrationRuntimeStatusInvalidResponse,
+		model.IntegrationRuntimeStatusUnreachable,
+		"draft",
+		"disabled",
+	} {
+		for _, instance := range instances {
+			if instance.RuntimeState == nil {
+				continue
+			}
+			if strings.ToLower(strings.TrimSpace(instance.Status)) == preferred {
+				return instance.RuntimeState
+			}
+		}
+	}
+
+	for _, instance := range instances {
+		if instance.RuntimeState != nil {
+			return instance.RuntimeState
+		}
+	}
+
+	return nil
 }
 
 func groupIntegrationCatalogEntries(entries []model.IntegrationCatalogEntry) []model.IntegrationCatalogDomain {

@@ -35,13 +35,14 @@ func verifyResolvedIntegrationType(
 	ctx context.Context,
 	conn *amqp.Connection,
 	db *sql.DB,
+	instanceManifest model.Manifest,
 	typeManifest model.Manifest,
 	instanceSpec model.IntegrationInstanceManifestSpec,
 	typeSpec model.IntegrationTypeManifestSpec,
 ) error {
 	channel := adapterQueueForCapability(typeSpec.Adapter.Queues, "describe")
 	endpoint := adapterEndpointForCapability(typeSpec.Adapter.Endpoints, "describe")
-	stateDetails := integrationDescribeStateDetails(typeManifest, typeSpec, channel, endpoint)
+	stateDetails := integrationDescribeStateDetails(instanceManifest, typeManifest, typeSpec, channel, endpoint)
 
 	if db == nil {
 		return fmt.Errorf("database connection is required to verify integration describe handshake")
@@ -53,10 +54,10 @@ func verifyResolvedIntegrationType(
 			typeManifest.Metadata.Namespace,
 			typeManifest.Metadata.Name,
 		)
-		return failIntegrationDescribeHandshake(ctx, db, typeManifest, model.IntegrationRuntimeStatusContractMismatch, err, stateDetails)
+		return failIntegrationDescribeHandshake(ctx, db, instanceManifest, typeManifest, model.IntegrationRuntimeStatusContractMismatch, err, stateDetails)
 	}
 
-	cacheKey := integrationDescribeCacheKey(typeManifest, typeSpec)
+	cacheKey := integrationDescribeCacheKey(instanceManifest, typeManifest, typeSpec, instanceSpec)
 	if integrationDescribeRecentlyVerified(cacheKey) {
 		return nil
 	}
@@ -91,6 +92,7 @@ func verifyResolvedIntegrationType(
 		return failIntegrationDescribeHandshake(
 			ctx,
 			db,
+			instanceManifest,
 			typeManifest,
 			integrationDescribeFailureStatus(wrappedErr),
 			wrappedErr,
@@ -109,7 +111,7 @@ func verifyResolvedIntegrationType(
 			typeManifest.Metadata.Name,
 			err,
 		)
-		return failIntegrationDescribeHandshake(ctx, db, typeManifest, model.IntegrationRuntimeStatusInvalidResponse, wrappedErr, stateDetails)
+		return failIntegrationDescribeHandshake(ctx, db, instanceManifest, typeManifest, model.IntegrationRuntimeStatusInvalidResponse, wrappedErr, stateDetails)
 	}
 
 	if err := compareIntegrationTypeSpec(typeSpec, liveSpec); err != nil {
@@ -119,12 +121,13 @@ func verifyResolvedIntegrationType(
 			typeManifest.Metadata.Name,
 			err,
 		)
-		return failIntegrationDescribeHandshake(ctx, db, typeManifest, model.IntegrationRuntimeStatusContractMismatch, wrappedErr, stateDetails)
+		return failIntegrationDescribeHandshake(ctx, db, instanceManifest, typeManifest, model.IntegrationRuntimeStatusContractMismatch, wrappedErr, stateDetails)
 	}
 
 	if _, err := repository.UpsertIntegrationRuntimeState(
 		ctx,
 		db,
+		instanceManifest,
 		typeManifest,
 		model.IntegrationRuntimeCheckKindDescribeHandshake,
 		model.IntegrationRuntimeStatusHealthy,
@@ -148,12 +151,13 @@ func verifyResolvedIntegrationType(
 }
 
 func integrationDescribeStateDetails(
+	instanceManifest model.Manifest,
 	typeManifest model.Manifest,
 	typeSpec model.IntegrationTypeManifestSpec,
 	queue string,
 	endpoint string,
 ) map[string]any {
-	return map[string]any{
+	details := map[string]any{
 		"integration_type": manifestReferenceFromRecord(typeManifest),
 		"provider":         strings.TrimSpace(typeSpec.Provider),
 		"adapter_version":  strings.TrimSpace(typeSpec.Adapter.Version),
@@ -161,6 +165,10 @@ func integrationDescribeStateDetails(
 		"endpoint":         strings.TrimSpace(endpoint),
 		"transport":        strings.TrimSpace(typeSpec.Adapter.Transport),
 	}
+	if instanceManifest.Kind == "integration_instance" {
+		details["integration_instance"] = manifestReferenceFromRecord(instanceManifest)
+	}
+	return details
 }
 
 func integrationDescribeLiveDetails(response model.AdapterDescribeResponse) map[string]any {
@@ -210,6 +218,7 @@ func integrationDescribeFailureStatus(err error) string {
 func failIntegrationDescribeHandshake(
 	ctx context.Context,
 	db *sql.DB,
+	instanceManifest model.Manifest,
 	typeManifest model.Manifest,
 	status string,
 	cause error,
@@ -228,6 +237,7 @@ func failIntegrationDescribeHandshake(
 	if _, err := repository.UpsertIntegrationRuntimeState(
 		ctx,
 		db,
+		instanceManifest,
 		typeManifest,
 		model.IntegrationRuntimeCheckKindDescribeHandshake,
 		status,
@@ -442,13 +452,27 @@ func formatContractMismatch(label string, expected any, actual any) error {
 	return fmt.Errorf("%s mismatch: expected %s, got %s", label, expectedJSON, actualJSON)
 }
 
-func integrationDescribeCacheKey(typeManifest model.Manifest, typeSpec model.IntegrationTypeManifestSpec) string {
+func integrationDescribeCacheKey(
+	instanceManifest model.Manifest,
+	typeManifest model.Manifest,
+	typeSpec model.IntegrationTypeManifestSpec,
+	instanceSpec model.IntegrationInstanceManifestSpec,
+) string {
+	instanceID := "global"
+	instanceChecksum := ""
+	if instanceManifest.Kind == "integration_instance" {
+		instanceID = instanceManifest.ID.String()
+		instanceChecksum = instanceManifest.Checksum
+	}
 	return strings.Join([]string{
+		instanceID,
+		instanceChecksum,
 		typeManifest.ID.String(),
 		typeManifest.Checksum,
 		strings.TrimSpace(typeSpec.Adapter.Version),
 		strings.TrimSpace(typeSpec.Adapter.Queues.Describe),
 		strings.TrimSpace(typeSpec.Adapter.Endpoints.Describe),
+		strings.TrimSpace(fmt.Sprint(instanceSpec.Config["base_url"])),
 	}, ":")
 }
 

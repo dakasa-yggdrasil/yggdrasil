@@ -13,10 +13,11 @@ import (
 
 var ErrIntegrationRuntimeStateNotFound = errors.New("integration runtime state not found")
 
-// UpsertIntegrationRuntimeState stores one observed runtime check result for an integration type.
+// UpsertIntegrationRuntimeState stores one observed runtime check result for an integration instance.
 func UpsertIntegrationRuntimeState(
 	ctx context.Context,
 	db *sql.DB,
+	instanceManifest model.Manifest,
 	typeManifest model.Manifest,
 	checkKind string,
 	status string,
@@ -33,6 +34,13 @@ func UpsertIntegrationRuntimeState(
 		return model.IntegrationRuntimeState{}, fmt.Errorf("integration runtime state status is required")
 	}
 
+	if instanceManifest.Kind != "integration_instance" {
+		return model.IntegrationRuntimeState{}, fmt.Errorf("manifest %s is not an integration_instance", instanceManifest.ID)
+	}
+	if typeManifest.Kind != "integration_type" {
+		return model.IntegrationRuntimeState{}, fmt.Errorf("manifest %s is not an integration_type", typeManifest.ID)
+	}
+
 	detailsRaw, err := marshalJSONObject(details)
 	if err != nil {
 		return model.IntegrationRuntimeState{}, err
@@ -41,7 +49,8 @@ func UpsertIntegrationRuntimeState(
 	row := db.QueryRowContext(
 		ctx,
 		`
-			INSERT INTO public.integration_runtime_states (
+			INSERT INTO public.integration_instance_runtime_states (
+				integration_instance_manifest_id,
 				integration_type_manifest_id,
 				check_kind,
 				status,
@@ -57,26 +66,28 @@ func UpsertIntegrationRuntimeState(
 				$2,
 				$3,
 				$4,
-				$5::jsonb,
+				$5,
+				$6::jsonb,
 				NOW(),
-				CASE WHEN $3 = 'healthy' THEN NOW() ELSE NULL END,
-				CASE WHEN $3 <> 'healthy' THEN NOW() ELSE NULL END,
+				CASE WHEN $4 = 'healthy' THEN NOW() ELSE NULL END,
+				CASE WHEN $4 <> 'healthy' THEN NOW() ELSE NULL END,
 				NOW(),
 				NOW()
 			)
-			ON CONFLICT (integration_type_manifest_id, check_kind)
+			ON CONFLICT (integration_instance_manifest_id, check_kind)
 			DO UPDATE SET
+				integration_type_manifest_id = EXCLUDED.integration_type_manifest_id,
 				status = EXCLUDED.status,
 				message = EXCLUDED.message,
 				details = EXCLUDED.details,
 				last_checked_at = EXCLUDED.last_checked_at,
 				last_success_at = CASE
 					WHEN EXCLUDED.status = 'healthy' THEN EXCLUDED.last_checked_at
-					ELSE public.integration_runtime_states.last_success_at
+					ELSE public.integration_instance_runtime_states.last_success_at
 				END,
 				last_failure_at = CASE
 					WHEN EXCLUDED.status <> 'healthy' THEN EXCLUDED.last_checked_at
-					ELSE public.integration_runtime_states.last_failure_at
+					ELSE public.integration_instance_runtime_states.last_failure_at
 				END,
 				updated_at = NOW()
 			RETURNING
@@ -90,6 +101,7 @@ func UpsertIntegrationRuntimeState(
 				created_at,
 				updated_at
 		`,
+		instanceManifest.ID,
 		typeManifest.ID,
 		checkKind,
 		status,
@@ -97,17 +109,17 @@ func UpsertIntegrationRuntimeState(
 		detailsRaw,
 	)
 
-	return scanIntegrationRuntimeState(typeManifest, row)
+	return scanIntegrationRuntimeState(instanceManifest, typeManifest, row)
 }
 
-// GetIntegrationRuntimeState fetches one runtime state by integration type and check kind.
+// GetIntegrationRuntimeState fetches one runtime state by integration instance and check kind.
 func GetIntegrationRuntimeState(
 	ctx context.Context,
 	db *sql.DB,
 	selector model.ManifestSelector,
 	checkKind string,
 ) (model.IntegrationRuntimeState, error) {
-	typeManifest, err := resolveIntegrationTypeManifest(ctx, db, selector)
+	instanceManifest, err := resolveIntegrationInstanceManifest(ctx, db, selector)
 	if err != nil {
 		return model.IntegrationRuntimeState{}, err
 	}
@@ -121,24 +133,30 @@ func GetIntegrationRuntimeState(
 		ctx,
 		`
 			SELECT
-				check_kind,
-				status,
-				message,
-				details,
-				last_checked_at,
-				last_success_at,
-				last_failure_at,
-				created_at,
-				updated_at
-			FROM public.integration_runtime_states
-			WHERE integration_type_manifest_id = $1
-				AND check_kind = $2
+				mt.id,
+				mt.kind,
+				mt.namespace,
+				mt.name,
+				mt.version,
+				s.check_kind,
+				s.status,
+				s.message,
+				s.details,
+				s.last_checked_at,
+				s.last_success_at,
+				s.last_failure_at,
+				s.created_at,
+				s.updated_at
+			FROM public.integration_instance_runtime_states s
+			INNER JOIN public.manifests mt ON mt.id = s.integration_type_manifest_id
+			WHERE s.integration_instance_manifest_id = $1
+				AND s.check_kind = $2
 		`,
-		typeManifest.ID,
+		instanceManifest.ID,
 		checkKind,
 	)
 
-	state, err := scanIntegrationRuntimeState(typeManifest, row)
+	state, err := scanIntegrationRuntimeStateWithType(instanceManifest, row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.IntegrationRuntimeState{}, ErrIntegrationRuntimeStateNotFound
@@ -157,11 +175,16 @@ func ListIntegrationRuntimeStates(
 ) ([]model.IntegrationRuntimeState, error) {
 	query := `
 		SELECT
-			m.id,
-			m.kind,
-			m.namespace,
-			m.name,
-			m.version,
+			mi.id,
+			mi.kind,
+			mi.namespace,
+			mi.name,
+			mi.version,
+			mt.id,
+			mt.kind,
+			mt.namespace,
+			mt.name,
+			mt.version,
 			s.check_kind,
 			s.status,
 			s.message,
@@ -171,9 +194,11 @@ func ListIntegrationRuntimeStates(
 			s.last_failure_at,
 			s.created_at,
 			s.updated_at
-		FROM public.integration_runtime_states s
-		INNER JOIN public.manifests m ON m.id = s.integration_type_manifest_id
-		WHERE m.kind = 'integration_type'
+		FROM public.integration_instance_runtime_states s
+		INNER JOIN public.manifests mi ON mi.id = s.integration_instance_manifest_id
+		INNER JOIN public.manifests mt ON mt.id = s.integration_type_manifest_id
+		WHERE mi.kind = 'integration_instance'
+			AND mt.kind = 'integration_type'
 	`
 
 	var (
@@ -183,11 +208,11 @@ func ListIntegrationRuntimeStates(
 
 	if namespace := strings.ToLower(strings.TrimSpace(req.Namespace)); namespace != "" {
 		args = append(args, namespace)
-		clauses = append(clauses, fmt.Sprintf("m.namespace = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("mi.namespace = $%d", len(args)))
 	}
 	if name := strings.ToLower(strings.TrimSpace(req.Name)); name != "" {
 		args = append(args, name)
-		clauses = append(clauses, fmt.Sprintf("m.name = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("mi.name = $%d", len(args)))
 	}
 	if status := strings.ToLower(strings.TrimSpace(req.Status)); status != "" {
 		args = append(args, status)
@@ -202,7 +227,7 @@ func ListIntegrationRuntimeStates(
 		query += " AND " + strings.Join(clauses, " AND ")
 	}
 
-	query += " ORDER BY m.namespace, m.name, s.check_kind"
+	query += " ORDER BY mi.namespace, mi.name, s.check_kind"
 
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -212,7 +237,7 @@ func ListIntegrationRuntimeStates(
 
 	states := make([]model.IntegrationRuntimeState, 0)
 	for rows.Next() {
-		state, err := scanIntegrationRuntimeStateWithManifest(rows)
+		state, err := scanIntegrationRuntimeStateWithManifests(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -225,7 +250,7 @@ func ListIntegrationRuntimeStates(
 	return states, nil
 }
 
-func resolveIntegrationTypeManifest(ctx context.Context, db *sql.DB, selector model.ManifestSelector) (model.Manifest, error) {
+func resolveIntegrationInstanceManifest(ctx context.Context, db *sql.DB, selector model.ManifestSelector) (model.Manifest, error) {
 	if manifestID := strings.TrimSpace(selector.ManifestID); manifestID != "" {
 		parsedID, err := uuid.Parse(manifestID)
 		if err != nil {
@@ -235,15 +260,15 @@ func resolveIntegrationTypeManifest(ctx context.Context, db *sql.DB, selector mo
 		if err != nil {
 			return model.Manifest{}, err
 		}
-		if manifest.Kind != "integration_type" {
-			return model.Manifest{}, fmt.Errorf("manifest %s is not an integration_type", parsedID)
+		if manifest.Kind != "integration_instance" {
+			return model.Manifest{}, fmt.Errorf("manifest %s is not an integration_instance", parsedID)
 		}
 		return manifest, nil
 	}
 
 	name := strings.TrimSpace(selector.Name)
 	if name == "" {
-		return model.Manifest{}, fmt.Errorf("integration type name is required when manifest_id is not provided")
+		return model.Manifest{}, fmt.Errorf("integration instance name is required when manifest_id is not provided")
 	}
 
 	namespace := strings.TrimSpace(selector.Namespace)
@@ -251,25 +276,33 @@ func resolveIntegrationTypeManifest(ctx context.Context, db *sql.DB, selector mo
 		namespace = "global"
 	}
 
-	return ResolveManifest(ctx, db, "integration_type", namespace, name, selector.Version, true)
+	return ResolveManifest(ctx, db, "integration_instance", namespace, name, selector.Version, true)
 }
 
-func scanIntegrationRuntimeStateWithManifest(row scanner) (model.IntegrationRuntimeState, error) {
+func scanIntegrationRuntimeStateWithManifests(row scanner) (model.IntegrationRuntimeState, error) {
 	var (
-		state         model.IntegrationRuntimeState
-		typeManifest  model.Manifest
-		namespace     string
-		name          string
-		details       []byte
-		lastSuccessAt sql.NullTime
-		lastFailureAt sql.NullTime
+		state            model.IntegrationRuntimeState
+		instanceManifest model.Manifest
+		typeManifest     model.Manifest
+		instanceNS       string
+		instanceName     string
+		typeNS           string
+		typeName         string
+		details          []byte
+		lastSuccessAt    sql.NullTime
+		lastFailureAt    sql.NullTime
 	)
 
 	err := row.Scan(
+		&instanceManifest.ID,
+		&instanceManifest.Kind,
+		&instanceNS,
+		&instanceName,
+		&instanceManifest.Version,
 		&typeManifest.ID,
 		&typeManifest.Kind,
-		&namespace,
-		&name,
+		&typeNS,
+		&typeName,
 		&typeManifest.Version,
 		&state.CheckKind,
 		&state.Status,
@@ -285,11 +318,18 @@ func scanIntegrationRuntimeStateWithManifest(row scanner) (model.IntegrationRunt
 		return model.IntegrationRuntimeState{}, err
 	}
 
+	state.IntegrationInstance = model.ManifestReference{
+		ID:        instanceManifest.ID,
+		Kind:      instanceManifest.Kind,
+		Namespace: instanceNS,
+		Name:      instanceName,
+		Version:   instanceManifest.Version,
+	}
 	state.IntegrationType = model.ManifestReference{
 		ID:        typeManifest.ID,
 		Kind:      typeManifest.Kind,
-		Namespace: namespace,
-		Name:      name,
+		Namespace: typeNS,
+		Name:      typeName,
 		Version:   typeManifest.Version,
 	}
 	if state.Details, err = unmarshalJSONObject(details); err != nil {
@@ -307,7 +347,68 @@ func scanIntegrationRuntimeStateWithManifest(row scanner) (model.IntegrationRunt
 	return state, nil
 }
 
-func scanIntegrationRuntimeState(typeManifest model.Manifest, row scanner) (model.IntegrationRuntimeState, error) {
+func scanIntegrationRuntimeStateWithType(instanceManifest model.Manifest, row scanner) (model.IntegrationRuntimeState, error) {
+	var (
+		state         model.IntegrationRuntimeState
+		typeManifest  model.Manifest
+		typeNamespace string
+		typeName      string
+		details       []byte
+		lastSuccessAt sql.NullTime
+		lastFailureAt sql.NullTime
+	)
+
+	err := row.Scan(
+		&typeManifest.ID,
+		&typeManifest.Kind,
+		&typeNamespace,
+		&typeName,
+		&typeManifest.Version,
+		&state.CheckKind,
+		&state.Status,
+		&state.Message,
+		&details,
+		&state.LastCheckedAt,
+		&lastSuccessAt,
+		&lastFailureAt,
+		&state.CreatedAt,
+		&state.UpdatedAt,
+	)
+	if err != nil {
+		return model.IntegrationRuntimeState{}, err
+	}
+
+	state.IntegrationInstance = model.ManifestReference{
+		ID:        instanceManifest.ID,
+		Kind:      instanceManifest.Kind,
+		Namespace: instanceManifest.Metadata.Namespace,
+		Name:      instanceManifest.Metadata.Name,
+		Version:   instanceManifest.Version,
+	}
+	state.IntegrationType = model.ManifestReference{
+		ID:        typeManifest.ID,
+		Kind:      typeManifest.Kind,
+		Namespace: typeNamespace,
+		Name:      typeName,
+		Version:   typeManifest.Version,
+	}
+
+	if state.Details, err = unmarshalJSONObject(details); err != nil {
+		return model.IntegrationRuntimeState{}, err
+	}
+	if lastSuccessAt.Valid {
+		value := lastSuccessAt.Time
+		state.LastSuccessAt = &value
+	}
+	if lastFailureAt.Valid {
+		value := lastFailureAt.Time
+		state.LastFailureAt = &value
+	}
+
+	return state, nil
+}
+
+func scanIntegrationRuntimeState(instanceManifest model.Manifest, typeManifest model.Manifest, row scanner) (model.IntegrationRuntimeState, error) {
 	var (
 		state         model.IntegrationRuntimeState
 		details       []byte
@@ -330,6 +431,13 @@ func scanIntegrationRuntimeState(typeManifest model.Manifest, row scanner) (mode
 		return model.IntegrationRuntimeState{}, err
 	}
 
+	state.IntegrationInstance = model.ManifestReference{
+		ID:        instanceManifest.ID,
+		Kind:      instanceManifest.Kind,
+		Namespace: instanceManifest.Metadata.Namespace,
+		Name:      instanceManifest.Metadata.Name,
+		Version:   instanceManifest.Version,
+	}
 	state.IntegrationType = model.ManifestReference{
 		ID:        typeManifest.ID,
 		Kind:      typeManifest.Kind,

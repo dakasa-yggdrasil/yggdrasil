@@ -47,7 +47,6 @@ func TestDeriveIntegrationCatalogPositionFallsBackFromPluginName(t *testing.T) {
 func TestSummarizeIntegrationCatalogEntryStatus(t *testing.T) {
 	tests := []struct {
 		name      string
-		runtime   *model.IntegrationRuntimeState
 		instances []model.IntegrationCatalogInstance
 		want      string
 	}{
@@ -63,21 +62,27 @@ func TestSummarizeIntegrationCatalogEntryStatus(t *testing.T) {
 			name: "unconfigured without instances or runtime",
 			want: model.IntegrationCatalogEntryStatusUnconfigured,
 		},
-		{
-			name: "runtime state used when no instances",
-			runtime: &model.IntegrationRuntimeState{
-				Status: model.IntegrationRuntimeStatusUnreachable,
-			},
-			want: model.IntegrationRuntimeStatusUnreachable,
-		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := summarizeIntegrationCatalogEntryStatus(tc.runtime, tc.instances); got != tc.want {
+			if got := summarizeIntegrationCatalogEntryStatus(tc.instances); got != tc.want {
 				t.Fatalf("summarizeIntegrationCatalogEntryStatus() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSummarizeIntegrationCatalogEntryRuntimeState(t *testing.T) {
+	healthy := &model.IntegrationRuntimeState{Status: model.IntegrationRuntimeStatusHealthy}
+	mismatch := &model.IntegrationRuntimeState{Status: model.IntegrationRuntimeStatusContractMismatch}
+
+	state := summarizeIntegrationCatalogEntryRuntimeState([]model.IntegrationCatalogInstance{
+		{Status: model.IntegrationRuntimeStatusContractMismatch, RuntimeState: mismatch},
+		{Status: model.IntegrationRuntimeStatusHealthy, RuntimeState: healthy},
+	})
+	if state != healthy {
+		t.Fatalf("expected healthy runtime state to win, got %#v", state)
 	}
 }
 

@@ -111,7 +111,7 @@ func integrationStatusGetHandler(conn *amqp.Connection, db *sql.DB, logger *zap.
 			req.CheckKind = model.IntegrationRuntimeCheckKindDescribeHandshake
 		}
 
-		state, err := repository.GetIntegrationRuntimeState(ctx, db, req.IntegrationType, req.CheckKind)
+		state, err := repository.GetIntegrationRuntimeState(ctx, db, req.IntegrationInstance, req.CheckKind)
 		if err != nil {
 			return replyFailure(ctx, conn, d, integrationRuntimeStateErrorCode(err), err, logger)
 		}
