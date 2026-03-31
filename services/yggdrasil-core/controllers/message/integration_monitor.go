@@ -130,6 +130,17 @@ func runIntegrationRuntimeMonitorSweep(
 			}
 			continue
 		}
+		if err := manifestengine.ValidateHydratedIntegrationInstanceInputs(instanceSpec, typeSpec); err != nil {
+			if logger != nil {
+				logger.Warn(
+					"integration runtime monitor found invalid hydrated integration inputs",
+					zap.String("namespace", manifestRecord.Metadata.Namespace),
+					zap.String("name", manifestRecord.Metadata.Name),
+					zap.Error(err),
+				)
+			}
+			continue
+		}
 
 		if err := verifyResolvedIntegrationType(
 			ctx,

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/dakasa-co/yggdrasil-core/model"
 )
@@ -15,24 +16,26 @@ var ErrManagedSecretNotFound = errors.New("managed secret not found")
 
 // UpsertManagedSecret creates or updates one namespaced secret in the core.
 func UpsertManagedSecret(ctx context.Context, db *sql.DB, req model.UpsertManagedSecretRequest) (model.ManagedSecret, error) {
-	namespace := strings.ToLower(strings.TrimSpace(req.Namespace))
-	if namespace == "" {
-		namespace = "global"
-	}
-
-	name := strings.ToLower(strings.TrimSpace(req.Name))
+	namespace := normalizeManagedSecretNamespace(req.Namespace)
+	name := normalizeManagedSecretName(req.Name)
 	if name == "" {
 		return model.ManagedSecret{}, fmt.Errorf("secret name is required")
 	}
 
-	status := strings.ToLower(strings.TrimSpace(req.Status))
+	status := normalizeManagedSecretStatus(req.Status)
 	if status == "" {
 		status = "active"
 	}
 	switch status {
-	case "active", "disabled":
+	case "active", "disabled", "revoked":
 	default:
 		return model.ManagedSecret{}, fmt.Errorf("secret status %q is unsupported", req.Status)
+	}
+	if err := validateManagedSecretRotation(req.Rotation); err != nil {
+		return model.ManagedSecret{}, err
+	}
+	if req.ExpiresAt != nil && req.ExpiresAt.UTC().IsZero() {
+		return model.ManagedSecret{}, fmt.Errorf("secret expires_at must be a valid timestamp")
 	}
 
 	dataRaw, err := marshalStringMap(req.Data)
@@ -40,6 +43,10 @@ func UpsertManagedSecret(ctx context.Context, db *sql.DB, req model.UpsertManage
 		return model.ManagedSecret{}, err
 	}
 	metadataRaw, err := marshalJSONObject(req.Metadata)
+	if err != nil {
+		return model.ManagedSecret{}, err
+	}
+	rotationRaw, err := marshalSecretRotationPolicy(req.Rotation)
 	if err != nil {
 		return model.ManagedSecret{}, err
 	}
@@ -52,27 +59,47 @@ func UpsertManagedSecret(ctx context.Context, db *sql.DB, req model.UpsertManage
 				name,
 				status,
 				data,
-				metadata
+				metadata,
+				rotation,
+				expires_at
 			) VALUES (
 				$1,
 				$2,
 				$3,
 				$4::jsonb,
-				$5::jsonb
+				$5::jsonb,
+				$6::jsonb,
+				$7
 			)
 			ON CONFLICT (namespace, name)
 			DO UPDATE SET
 				status = EXCLUDED.status,
 				data = EXCLUDED.data,
 				metadata = EXCLUDED.metadata,
+				rotation = EXCLUDED.rotation,
+				expires_at = EXCLUDED.expires_at,
+				version = CASE
+					WHEN public.managed_secrets.data IS DISTINCT FROM EXCLUDED.data
+						THEN public.managed_secrets.version + 1
+					ELSE public.managed_secrets.version
+				END,
+				last_rotated_at = CASE
+					WHEN public.managed_secrets.data IS DISTINCT FROM EXCLUDED.data
+						THEN NOW()
+					ELSE public.managed_secrets.last_rotated_at
+				END,
 				updated_at = NOW()
 			RETURNING
 				id,
 				namespace,
 				name,
 				status,
+				version,
 				data,
 				metadata,
+				rotation,
+				last_rotated_at,
+				expires_at,
 				created_at,
 				updated_at
 		`,
@@ -81,18 +108,53 @@ func UpsertManagedSecret(ctx context.Context, db *sql.DB, req model.UpsertManage
 		status,
 		dataRaw,
 		metadataRaw,
+		rotationRaw,
+		req.ExpiresAt,
 	)
 
 	return scanManagedSecret(row)
 }
 
+// RotateManagedSecret replaces the secret payload of one existing secret and reactivates it.
+func RotateManagedSecret(ctx context.Context, db *sql.DB, req model.RotateManagedSecretRequest) (model.ManagedSecret, error) {
+	current, err := GetManagedSecret(ctx, db, model.GetManagedSecretRequest{
+		Namespace: req.Namespace,
+		Name:      req.Name,
+	})
+	if err != nil {
+		return model.ManagedSecret{}, err
+	}
+
+	expiresAt := req.ExpiresAt
+	if expiresAt == nil {
+		expiresAt = current.ExpiresAt
+	}
+
+	return UpsertManagedSecret(ctx, db, model.UpsertManagedSecretRequest{
+		Namespace: current.Namespace,
+		Name:      current.Name,
+		Status:    "active",
+		Data:      req.Data,
+		Metadata:  mergeJSONObject(current.Metadata, req.Metadata),
+		Rotation:  normalizeManagedSecretRotation(req.Rotation, current.Rotation),
+		ExpiresAt: expiresAt,
+	})
+}
+
+// DisableManagedSecret marks one secret as disabled while preserving the stored material.
+func DisableManagedSecret(ctx context.Context, db *sql.DB, req model.DisableManagedSecretRequest) (model.ManagedSecret, error) {
+	return updateManagedSecretStatus(ctx, db, req.Namespace, req.Name, "disabled", nil, req.Metadata)
+}
+
+// RevokeManagedSecret marks one secret as revoked and clears the stored material.
+func RevokeManagedSecret(ctx context.Context, db *sql.DB, req model.RevokeManagedSecretRequest) (model.ManagedSecret, error) {
+	return updateManagedSecretStatus(ctx, db, req.Namespace, req.Name, "revoked", map[string]string{}, req.Metadata)
+}
+
 // GetManagedSecret fetches one secret by namespace and name.
 func GetManagedSecret(ctx context.Context, db *sql.DB, req model.GetManagedSecretRequest) (model.ManagedSecret, error) {
-	namespace := strings.ToLower(strings.TrimSpace(req.Namespace))
-	if namespace == "" {
-		namespace = "global"
-	}
-	name := strings.ToLower(strings.TrimSpace(req.Name))
+	namespace := normalizeManagedSecretNamespace(req.Namespace)
+	name := normalizeManagedSecretName(req.Name)
 	if name == "" {
 		return model.ManagedSecret{}, fmt.Errorf("secret name is required")
 	}
@@ -105,8 +167,12 @@ func GetManagedSecret(ctx context.Context, db *sql.DB, req model.GetManagedSecre
 				namespace,
 				name,
 				status,
+				version,
 				data,
 				metadata,
+				rotation,
+				last_rotated_at,
+				expires_at,
 				created_at,
 				updated_at
 			FROM public.managed_secrets
@@ -135,8 +201,12 @@ func ListManagedSecrets(ctx context.Context, db *sql.DB, req model.ListManagedSe
 			namespace,
 			name,
 			status,
+			version,
 			data,
 			metadata,
+			rotation,
+			last_rotated_at,
+			expires_at,
 			created_at,
 			updated_at
 		FROM public.managed_secrets
@@ -147,11 +217,11 @@ func ListManagedSecrets(ctx context.Context, db *sql.DB, req model.ListManagedSe
 		args    []any
 	)
 
-	if namespace := strings.ToLower(strings.TrimSpace(req.Namespace)); namespace != "" {
+	if namespace := normalizeManagedSecretNamespace(req.Namespace); namespace != "global" || strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, namespace)
 		clauses = append(clauses, fmt.Sprintf("namespace = $%d", len(args)))
 	}
-	if status := strings.ToLower(strings.TrimSpace(req.Status)); status != "" {
+	if status := normalizeManagedSecretStatus(req.Status); status != "" {
 		args = append(args, status)
 		clauses = append(clauses, fmt.Sprintf("status = $%d", len(args)))
 	}
@@ -180,6 +250,96 @@ func ListManagedSecrets(ctx context.Context, db *sql.DB, req model.ListManagedSe
 	return items, nil
 }
 
+func updateManagedSecretStatus(
+	ctx context.Context,
+	db *sql.DB,
+	namespaceRaw string,
+	nameRaw string,
+	status string,
+	data map[string]string,
+	metadata map[string]any,
+) (model.ManagedSecret, error) {
+	current, err := GetManagedSecret(ctx, db, model.GetManagedSecretRequest{
+		Namespace: namespaceRaw,
+		Name:      nameRaw,
+	})
+	if err != nil {
+		return model.ManagedSecret{}, err
+	}
+
+	status = normalizeManagedSecretStatus(status)
+	if status == "" {
+		return model.ManagedSecret{}, fmt.Errorf("secret status is required")
+	}
+
+	var (
+		dataRaw     []byte
+		metadataRaw []byte
+	)
+	if data == nil {
+		data = current.Data
+	}
+	dataRaw, err = marshalStringMap(data)
+	if err != nil {
+		return model.ManagedSecret{}, err
+	}
+	metadataRaw, err = marshalJSONObject(mergeJSONObject(current.Metadata, metadata))
+	if err != nil {
+		return model.ManagedSecret{}, err
+	}
+
+	row := db.QueryRowContext(
+		ctx,
+		`
+			UPDATE public.managed_secrets
+			SET
+				status = $3,
+				data = $4::jsonb,
+				metadata = $5::jsonb,
+				version = CASE
+					WHEN public.managed_secrets.data IS DISTINCT FROM $4::jsonb
+						THEN public.managed_secrets.version + 1
+					ELSE public.managed_secrets.version
+				END,
+				last_rotated_at = CASE
+					WHEN public.managed_secrets.data IS DISTINCT FROM $4::jsonb
+						THEN NOW()
+					ELSE public.managed_secrets.last_rotated_at
+				END,
+				updated_at = NOW()
+			WHERE namespace = $1
+				AND name = $2
+			RETURNING
+				id,
+				namespace,
+				name,
+				status,
+				version,
+				data,
+				metadata,
+				rotation,
+				last_rotated_at,
+				expires_at,
+				created_at,
+				updated_at
+		`,
+		current.Namespace,
+		current.Name,
+		status,
+		dataRaw,
+		metadataRaw,
+	)
+
+	secret, err := scanManagedSecret(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return model.ManagedSecret{}, ErrManagedSecretNotFound
+		}
+		return model.ManagedSecret{}, err
+	}
+	return secret, nil
+}
+
 // ResolveSecretRef resolves one secret:// reference into its stored value.
 func ResolveSecretRef(ctx context.Context, db *sql.DB, ref string) (any, error) {
 	namespace, name, key, err := parseSecretRef(ref)
@@ -196,6 +356,9 @@ func ResolveSecretRef(ctx context.Context, db *sql.DB, ref string) (any, error) 
 	}
 	if strings.ToLower(strings.TrimSpace(secret.Status)) != "active" {
 		return nil, fmt.Errorf("secret %s/%s is not active", secret.Namespace, secret.Name)
+	}
+	if secret.IsExpired(time.Now().UTC()) {
+		return nil, fmt.Errorf("secret %s/%s is expired", secret.Namespace, secret.Name)
 	}
 
 	if key != "" {
@@ -282,9 +445,11 @@ func parseSecretRef(ref string) (namespace string, name string, key string, err 
 
 func scanManagedSecret(row scanner) (model.ManagedSecret, error) {
 	var (
-		secret      model.ManagedSecret
-		dataRaw     []byte
-		metadataRaw []byte
+		secret       model.ManagedSecret
+		dataRaw      []byte
+		metadataRaw  []byte
+		rotationRaw  []byte
+		expiresAtRaw sql.NullTime
 	)
 
 	if err := row.Scan(
@@ -292,8 +457,12 @@ func scanManagedSecret(row scanner) (model.ManagedSecret, error) {
 		&secret.Namespace,
 		&secret.Name,
 		&secret.Status,
+		&secret.Version,
 		&dataRaw,
 		&metadataRaw,
+		&rotationRaw,
+		&secret.LastRotatedAt,
+		&expiresAtRaw,
 		&secret.CreatedAt,
 		&secret.UpdatedAt,
 	); err != nil {
@@ -308,9 +477,18 @@ func scanManagedSecret(row scanner) (model.ManagedSecret, error) {
 	if err != nil {
 		return model.ManagedSecret{}, err
 	}
+	rotation, err := unmarshalSecretRotationPolicy(rotationRaw)
+	if err != nil {
+		return model.ManagedSecret{}, err
+	}
 
 	secret.Data = data
 	secret.Metadata = metadata
+	secret.Rotation = rotation
+	if expiresAtRaw.Valid {
+		expiresAt := expiresAtRaw.Time.UTC()
+		secret.ExpiresAt = &expiresAt
+	}
 	return secret, nil
 }
 
@@ -335,6 +513,77 @@ func unmarshalStringMap(raw []byte) (map[string]string, error) {
 		return nil, err
 	}
 	return output, nil
+}
+
+func marshalSecretRotationPolicy(value model.ManagedSecretRotationPolicy) ([]byte, error) {
+	return jsonMarshal(value)
+}
+
+func unmarshalSecretRotationPolicy(raw []byte) (model.ManagedSecretRotationPolicy, error) {
+	if len(raw) == 0 {
+		return model.ManagedSecretRotationPolicy{}, nil
+	}
+	var output model.ManagedSecretRotationPolicy
+	if err := jsonUnmarshal(raw, &output); err != nil {
+		return model.ManagedSecretRotationPolicy{}, err
+	}
+	return output, nil
+}
+
+func validateManagedSecretRotation(rotation model.ManagedSecretRotationPolicy) error {
+	mode := strings.ToLower(strings.TrimSpace(rotation.Mode))
+	switch mode {
+	case "", "manual", "scheduled":
+	default:
+		return fmt.Errorf("secret rotation mode %q is unsupported", rotation.Mode)
+	}
+	if rotation.RotateAfterDays < 0 {
+		return fmt.Errorf("secret rotation rotate_after_days cannot be negative")
+	}
+	if mode == "scheduled" && rotation.RotateAfterDays <= 0 {
+		return fmt.Errorf("secret rotation mode %q requires rotate_after_days", rotation.Mode)
+	}
+	return nil
+}
+
+func normalizeManagedSecretNamespace(namespace string) string {
+	namespace = strings.ToLower(strings.TrimSpace(namespace))
+	if namespace == "" {
+		return "global"
+	}
+	return namespace
+}
+
+func normalizeManagedSecretName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func normalizeManagedSecretStatus(status string) string {
+	return strings.ToLower(strings.TrimSpace(status))
+}
+
+func normalizeManagedSecretRotation(
+	next model.ManagedSecretRotationPolicy,
+	current model.ManagedSecretRotationPolicy,
+) model.ManagedSecretRotationPolicy {
+	if strings.TrimSpace(next.Mode) == "" && next.RotateAfterDays == 0 {
+		return current
+	}
+	return next
+}
+
+func mergeJSONObject(base map[string]any, extra map[string]any) map[string]any {
+	if len(base) == 0 && len(extra) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(base)+len(extra))
+	for key, value := range base {
+		out[key] = value
+	}
+	for key, value := range extra {
+		out[key] = value
+	}
+	return out
 }
 
 func jsonMarshal(value any) ([]byte, error) {

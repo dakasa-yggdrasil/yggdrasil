@@ -224,7 +224,7 @@ func buildCatalogDiscoverySource(
 	typeSpec model.IntegrationTypeManifestSpec,
 ) (model.CatalogDiscoverySource, error) {
 	position := deriveIntegrationCatalogPosition(typeManifest, typeSpec)
-	health, err := buildIntegrationInstanceHealth(ctx, db, instanceManifest, model.IntegrationRuntimeCheckKindDescribeHandshake)
+	health, err := buildIntegrationInstanceHealth(ctx, db, instanceManifest, model.IntegrationRuntimeCheckKindOverall)
 	if err != nil {
 		return model.CatalogDiscoverySource{}, err
 	}

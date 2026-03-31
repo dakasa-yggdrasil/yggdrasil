@@ -121,29 +121,27 @@ func buildIntegrationInstanceHealth(
 		IntegrationType:     manifestReferenceFromRecord(typeManifest),
 		DeclaredStatus:      declaredStatus,
 		CheckKind:           checkKind,
-		Status:              integrationInstanceOverallStatus(declaredStatus, nil),
+		Status:              integrationInstanceOverallStatus(declaredStatus, checkKind, nil),
 	}
 
 	if declaredStatus != "active" {
 		return health, nil
 	}
 
-	runtimeState, err := repository.GetIntegrationRuntimeState(ctx, db, model.ManifestSelector{
-		ManifestID: instanceManifest.ID.String(),
-		Namespace:  instanceManifest.Metadata.Namespace,
-		Name:       instanceManifest.Metadata.Name,
-		Version:    &instanceManifest.Version,
-	}, checkKind)
+	runtimeStates, err := loadIntegrationRuntimeStatesForHealth(ctx, db, instanceManifest, checkKind)
 	if err != nil {
 		if errors.Is(err, repository.ErrIntegrationRuntimeStateNotFound) {
-			health.Status = integrationInstanceOverallStatus(declaredStatus, nil)
+			health.Status = integrationInstanceOverallStatus(declaredStatus, checkKind, nil)
 			return health, nil
 		}
 		return model.IntegrationInstanceHealth{}, err
 	}
 
-	health.Status = integrationInstanceOverallStatus(declaredStatus, &runtimeState)
-	health.RuntimeState = &runtimeState
+	health.Status = integrationInstanceOverallStatus(declaredStatus, checkKind, runtimeStates)
+	health.RuntimeChecks = runtimeStates
+	if representative := representativeIntegrationRuntimeState(runtimeStates); representative != nil {
+		health.RuntimeState = representative
+	}
 	return health, nil
 }
 
@@ -162,7 +160,7 @@ func preflightIntegrationInstanceHealth(
 		IntegrationType:     manifestReferenceFromRecord(typeManifest),
 		DeclaredStatus:      declaredStatus,
 		CheckKind:           checkKind,
-		Status:              integrationInstanceOverallStatus(declaredStatus, nil),
+		Status:              integrationInstanceOverallStatus(declaredStatus, checkKind, nil),
 	}
 
 	if declaredStatus != "active" {
@@ -172,12 +170,7 @@ func preflightIntegrationInstanceHealth(
 		}
 	}
 
-	runtimeState, err := repository.GetIntegrationRuntimeState(ctx, db, model.ManifestSelector{
-		ManifestID: instanceManifest.ID.String(),
-		Namespace:  instanceManifest.Metadata.Namespace,
-		Name:       instanceManifest.Metadata.Name,
-		Version:    &instanceManifest.Version,
-	}, checkKind)
+	runtimeStates, err := loadIntegrationRuntimeStatesForHealth(ctx, db, instanceManifest, checkKind)
 	if err != nil {
 		if errors.Is(err, repository.ErrIntegrationRuntimeStateNotFound) {
 			return nil
@@ -185,9 +178,12 @@ func preflightIntegrationInstanceHealth(
 		return err
 	}
 
-	health.RuntimeState = &runtimeState
-	health.Status = integrationInstanceOverallStatus(declaredStatus, &runtimeState)
-	if shouldFastFailIntegrationRuntimeState(runtimeState, time.Now().UTC()) {
+	health.RuntimeChecks = runtimeStates
+	health.Status = integrationInstanceOverallStatus(declaredStatus, checkKind, runtimeStates)
+	if representative := representativeIntegrationRuntimeState(runtimeStates); representative != nil {
+		health.RuntimeState = representative
+	}
+	if shouldFastFailIntegrationRuntimeStates(runtimeStates, time.Now().UTC()) {
 		return &integrationHealthGateError{
 			Health: health,
 			Reason: "recent runtime state is unhealthy",
@@ -200,7 +196,7 @@ func preflightIntegrationInstanceHealth(
 func normalizeIntegrationInstanceHealthCheckKind(checkKind string) string {
 	checkKind = strings.ToLower(strings.TrimSpace(checkKind))
 	if checkKind == "" {
-		return model.IntegrationRuntimeCheckKindDescribeHandshake
+		return model.IntegrationRuntimeCheckKindOverall
 	}
 	return checkKind
 }
@@ -213,15 +209,24 @@ func normalizeIntegrationInstanceDeclaredStatus(status string) string {
 	return status
 }
 
-func integrationInstanceOverallStatus(declaredStatus string, runtimeState *model.IntegrationRuntimeState) string {
+func integrationInstanceOverallStatus(declaredStatus string, checkKind string, runtimeStates []model.IntegrationRuntimeState) string {
 	declaredStatus = normalizeIntegrationInstanceDeclaredStatus(declaredStatus)
 	if declaredStatus != "active" {
 		return declaredStatus
 	}
-	if runtimeState == nil {
+	if len(runtimeStates) == 0 {
 		return model.IntegrationInstanceHealthStatusUnknown
 	}
-	return strings.ToLower(strings.TrimSpace(runtimeState.Status))
+	representative := representativeIntegrationRuntimeState(runtimeStates)
+	if representative == nil {
+		return model.IntegrationInstanceHealthStatusUnknown
+	}
+	if checkKind == model.IntegrationRuntimeCheckKindOverall && len(runtimeStates) < len(integrationHealthRequiredCheckKinds(checkKind)) {
+		if !isIntegrationRuntimeStateUnhealthy(*representative) {
+			return model.IntegrationInstanceHealthStatusUnknown
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(representative.Status))
 }
 
 func shouldFastFailIntegrationRuntimeState(state model.IntegrationRuntimeState, now time.Time) bool {
@@ -239,6 +244,99 @@ func shouldFastFailIntegrationRuntimeState(state model.IntegrationRuntimeState, 
 	}
 
 	return now.Sub(state.LastCheckedAt.UTC()) <= integrationRuntimeFastFailWindow
+}
+
+func shouldFastFailIntegrationRuntimeStates(states []model.IntegrationRuntimeState, now time.Time) bool {
+	for _, state := range states {
+		if shouldFastFailIntegrationRuntimeState(state, now) {
+			return true
+		}
+	}
+	return false
+}
+
+func loadIntegrationRuntimeStatesForHealth(
+	ctx context.Context,
+	db *sql.DB,
+	instanceManifest model.Manifest,
+	checkKind string,
+) ([]model.IntegrationRuntimeState, error) {
+	kinds := integrationHealthRequiredCheckKinds(checkKind)
+	states := make([]model.IntegrationRuntimeState, 0, len(kinds))
+	for _, kind := range kinds {
+		state, err := repository.GetIntegrationRuntimeState(ctx, db, model.ManifestSelector{
+			ManifestID: instanceManifest.ID.String(),
+			Namespace:  instanceManifest.Metadata.Namespace,
+			Name:       instanceManifest.Metadata.Name,
+			Version:    &instanceManifest.Version,
+		}, kind)
+		if err != nil {
+			if errors.Is(err, repository.ErrIntegrationRuntimeStateNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		states = append(states, state)
+	}
+	if len(states) == 0 {
+		return nil, repository.ErrIntegrationRuntimeStateNotFound
+	}
+	return states, nil
+}
+
+func integrationHealthRequiredCheckKinds(checkKind string) []string {
+	switch normalizeIntegrationInstanceHealthCheckKind(checkKind) {
+	case model.IntegrationRuntimeCheckKindOverall:
+		return []string{
+			model.IntegrationRuntimeCheckKindTransportConnectivity,
+			model.IntegrationRuntimeCheckKindDescribeHandshake,
+		}
+	default:
+		return []string{normalizeIntegrationInstanceHealthCheckKind(checkKind)}
+	}
+}
+
+func representativeIntegrationRuntimeState(states []model.IntegrationRuntimeState) *model.IntegrationRuntimeState {
+	if len(states) == 0 {
+		return nil
+	}
+	bestIndex := 0
+	bestScore := integrationRuntimeStatusSeverity(states[0].Status)
+	for index := 1; index < len(states); index++ {
+		score := integrationRuntimeStatusSeverity(states[index].Status)
+		if score > bestScore {
+			bestIndex = index
+			bestScore = score
+		}
+	}
+	best := states[bestIndex]
+	return &best
+}
+
+func integrationRuntimeStatusSeverity(status string) int {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case model.IntegrationRuntimeStatusUnreachable:
+		return 4
+	case model.IntegrationRuntimeStatusContractMismatch:
+		return 3
+	case model.IntegrationRuntimeStatusInvalidResponse:
+		return 2
+	case model.IntegrationRuntimeStatusHealthy:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func isIntegrationRuntimeStateUnhealthy(state model.IntegrationRuntimeState) bool {
+	switch strings.ToLower(strings.TrimSpace(state.Status)) {
+	case model.IntegrationRuntimeStatusContractMismatch,
+		model.IntegrationRuntimeStatusInvalidResponse,
+		model.IntegrationRuntimeStatusUnreachable:
+		return true
+	default:
+		return false
+	}
 }
 
 func integrationInstanceHealthErrorCode(err error) string {

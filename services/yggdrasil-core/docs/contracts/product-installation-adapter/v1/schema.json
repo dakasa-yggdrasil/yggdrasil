@@ -88,6 +88,14 @@
       },
       "additionalProperties": false
     },
+    "integrationCredentialPolicySpec": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string" },
+        "materialize_inline": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
     "integrationResourceType": {
       "type": "object",
       "required": ["name", "canonical_prefix", "identity_template", "discoverable", "default_actions"],
@@ -167,6 +175,7 @@
         "provider": { "type": "string" },
         "adapter": { "$ref": "#/$defs/integrationAdapterSpec" },
         "capabilities": { "type": "array", "items": { "type": "string" } },
+        "credential_policy": { "$ref": "#/$defs/integrationCredentialPolicySpec" },
         "credential_schema": { "$ref": "#/$defs/integrationSchemaSpec" },
         "instance_schema": { "$ref": "#/$defs/integrationSchemaSpec" },
         "resource_types": { "type": "array", "items": { "$ref": "#/$defs/integrationResourceType" } },

@@ -28,7 +28,7 @@ The current service foundation includes:
 - direct auth/session HTTP endpoints under `/api/v1/auth/...`
 - direct domain HTTP endpoints under `/api/v1/...`
 - direct console-oriented HTTP endpoints under `/api/v1/console/...`
-- managed secrets stored in the core and referenceable through `secret://namespace/name[#key]`
+- managed secrets stored in the core, versioned with rotation metadata, redacted by default in HTTP responses, and referenceable through `secret://namespace/name[#key]`
 
 ## Public contracts
 
@@ -100,6 +100,7 @@ The first supported kinds are:
 - reference to one `integration_type`
 - concrete credentials and instance config
 - optional `credentials_ref` pointing at core-managed secrets
+- console/API creation paths materialize inline credentials into managed secrets and persist `credentials_ref`
 - owners and lifecycle status
 - discovery scheduling/enablement
 - runtime execution overrides such as batch size and default dry-run
@@ -183,6 +184,9 @@ Additional direct core endpoints now include:
 - `/api/v1/catalog/discovery/register`
 - `/api/v1/integration-instances`
 - `/api/v1/secrets`
+- `/api/v1/secrets/{namespace}/{name}/rotate`
+- `/api/v1/secrets/{namespace}/{name}/disable`
+- `/api/v1/secrets/{namespace}/{name}/revoke`
 - `/api/v1/products`
 - `/api/v1/surfaces`
 - `/api/v1/workflows`
@@ -1171,8 +1175,13 @@ When the core materializes an integration-backed component, it calls the integra
 The adapter returns raw Kubernetes objects, and the core persists the resulting materialized
 product spec together with component-level trace metadata.
 
-The core persists observed adapter contract state for each `integration_instance` under the
-`describe_handshake` check. The current statuses are:
+The core persists observed adapter runtime state for each `integration_instance` under explicit
+checks such as:
+
+- `transport_connectivity`
+- `describe_handshake`
+
+The current statuses are:
 
 - `healthy`
 - `contract_mismatch`
@@ -1185,9 +1194,10 @@ These states are queryable through:
 - `yggdrasil-core.integration.status.list`
 
 The core also derives a higher-level health view per `integration_instance`. For active instances,
-it mirrors the latest runtime status recorded for that instance; for instances without a recorded
-runtime check yet, it returns `unknown`; and for non-active instances it returns the declared
-manifest status such as `draft` or `disabled`.
+the default `overall` view combines both `transport_connectivity` and `describe_handshake`,
+fast-failing when either recent check is unhealthy. If one of those checks is still missing and the
+known checks are healthy, the overall status remains `unknown`. Non-active instances still return
+their declared manifest status such as `draft` or `disabled`.
 
 These views are queryable through:
 
@@ -1195,8 +1205,8 @@ These views are queryable through:
 - `yggdrasil-core.integration.instance_health.list`
 
 In addition, the worker now runs a periodic background sweep that rechecks active
-`integration_instance` describe handshakes. The interval defaults to `60s` and can be overridden with
-`INTEGRATION_RUNTIME_MONITOR_INTERVAL_SECONDS`.
+`integration_instance` transport connectivity and describe handshakes. The interval defaults to
+`60s` and can be overridden with `INTEGRATION_RUNTIME_MONITOR_INTERVAL_SECONDS`.
 
 After generation, the core also exposes two explicit installation RPC flows:
 

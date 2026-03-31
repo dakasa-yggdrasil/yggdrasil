@@ -2,17 +2,18 @@ package model
 
 // IntegrationTypeManifestSpec describes one adapter contract supported by Yggdrasil.
 type IntegrationTypeManifestSpec struct {
-	Provider         string                        `json:"provider"`
-	Adapter          IntegrationAdapterSpec        `json:"adapter"`
-	Capabilities     []string                      `json:"capabilities"`
-	CredentialSchema IntegrationSchemaSpec         `json:"credential_schema"`
-	InstanceSchema   IntegrationSchemaSpec         `json:"instance_schema"`
-	ResourceTypes    []IntegrationResourceType     `json:"resource_types"`
-	ActionCatalog    []IntegrationActionDefinition `json:"action_catalog,omitempty"`
-	Discovery        IntegrationDiscoverySpec      `json:"discovery"`
-	Normalization    IntegrationNormalizationSpec  `json:"normalization"`
-	Execution        IntegrationExecutionSpec      `json:"execution"`
-	Extensions       IntegrationExtensionsSpec     `json:"extensions"`
+	Provider         string                          `json:"provider"`
+	Adapter          IntegrationAdapterSpec          `json:"adapter"`
+	Capabilities     []string                        `json:"capabilities"`
+	CredentialPolicy IntegrationCredentialPolicySpec `json:"credential_policy,omitempty"`
+	CredentialSchema IntegrationSchemaSpec           `json:"credential_schema"`
+	InstanceSchema   IntegrationSchemaSpec           `json:"instance_schema"`
+	ResourceTypes    []IntegrationResourceType       `json:"resource_types"`
+	ActionCatalog    []IntegrationActionDefinition   `json:"action_catalog,omitempty"`
+	Discovery        IntegrationDiscoverySpec        `json:"discovery"`
+	Normalization    IntegrationNormalizationSpec    `json:"normalization"`
+	Execution        IntegrationExecutionSpec        `json:"execution"`
+	Extensions       IntegrationExtensionsSpec       `json:"extensions"`
 }
 
 // IntegrationAdapterSpec declares how the adapter is reached by the core.
@@ -58,6 +59,12 @@ type IntegrationSchemaProperty struct {
 	Secret      bool   `json:"secret,omitempty"`
 	Enum        []any  `json:"enum,omitempty"`
 	Default     any    `json:"default,omitempty"`
+}
+
+// IntegrationCredentialPolicySpec defines how one integration_type expects credentials to be supplied and stored.
+type IntegrationCredentialPolicySpec struct {
+	Source            string `json:"source,omitempty"`
+	MaterializeInline bool   `json:"materialize_inline,omitempty"`
 }
 
 // IntegrationResourceType defines one external resource category exposed by the adapter.

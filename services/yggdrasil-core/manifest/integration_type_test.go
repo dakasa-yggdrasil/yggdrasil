@@ -51,6 +51,17 @@ func TestValidateIntegrationTypeSpecRejectsUnknownActionResourceType(t *testing.
 	}
 }
 
+func TestValidateIntegrationTypeSpecRejectsCredentialPolicyConflict(t *testing.T) {
+	spec := integrationTypeSpecFixture()
+	spec.CredentialPolicy = model.IntegrationCredentialPolicySpec{
+		Source: "none",
+	}
+
+	if err := ValidateIntegrationTypeSpec(spec); err == nil {
+		t.Fatal("expected conflicting credential policy to fail validation")
+	}
+}
+
 func TestIntegrationTypeDocumentValidation(t *testing.T) {
 	raw, err := json.Marshal(integrationTypeSpecFixture())
 	if err != nil {
@@ -89,6 +100,10 @@ func integrationTypeSpecFixture() model.IntegrationTypeManifestSpec {
 			},
 		},
 		Capabilities: []string{"describe", "discover", "read", "execute", "sync", "health"},
+		CredentialPolicy: model.IntegrationCredentialPolicySpec{
+			Source:            "inline_or_secret_ref",
+			MaterializeInline: true,
+		},
 		CredentialSchema: model.IntegrationSchemaSpec{
 			Mode:     "secret_ref",
 			Required: []string{"app_id", "installation_id", "private_key_ref"},

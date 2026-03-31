@@ -64,6 +64,27 @@ JSON
 
 curl -fsS "${core_url}/api/v1/secrets/global/${secret_name}" >/dev/null
 
+echo "Rotating managed secret ${secret_name}..."
+curl -fsS \
+  -X POST \
+  -H "Content-Type: application/json" \
+  "${core_url}/api/v1/secrets/global/${secret_name}/rotate" \
+  -d '{"data":{"token":"smoke-token-rotated","endpoint":"https://example.internal"}}' >/dev/null
+
+echo "Disabling managed secret ${secret_name}..."
+curl -fsS \
+  -X POST \
+  -H "Content-Type: application/json" \
+  "${core_url}/api/v1/secrets/global/${secret_name}/disable" \
+  -d '{"metadata":{"reason":"smoke-disable"}}' >/dev/null
+
+echo "Revoking managed secret ${secret_name}..."
+curl -fsS \
+  -X POST \
+  -H "Content-Type: application/json" \
+  "${core_url}/api/v1/secrets/global/${secret_name}/revoke" \
+  -d '{"metadata":{"reason":"smoke-revoke"}}' >/dev/null
+
 slug_suffix="$(date +%s)"
 collaborator_slug="col:smoke-${slug_suffix}"
 collaborator_email="smoke-${slug_suffix}@example.com"

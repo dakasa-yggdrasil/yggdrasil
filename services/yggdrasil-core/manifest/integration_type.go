@@ -21,6 +21,7 @@ var (
 	}
 	supportedIntegrationTransports     = []string{"rabbitmq", "http_json"}
 	supportedIntegrationSchemaModes    = []string{"none", "inline", "secret_ref"}
+	supportedCredentialPolicySources   = []string{"none", "inline", "secret_ref", "inline_or_secret_ref"}
 	supportedIntegrationSchemaTypes    = []string{"string", "number", "integer", "boolean", "object", "array"}
 	supportedIntegrationDiscoveryModes = []string{"pull", "push", "hybrid"}
 	supportedIntegrationCursorModes    = []string{"none", "full", "incremental"}
@@ -52,6 +53,9 @@ func ValidateIntegrationTypeSpec(spec model.IntegrationTypeManifestSpec) error {
 	if err := validateIntegrationCapabilities(spec.Capabilities); err != nil {
 		return err
 	}
+	if err := ValidateIntegrationCredentialPolicy(spec.CredentialPolicy, spec.CredentialSchema); err != nil {
+		return err
+	}
 	if err := validateIntegrationSchema("credential_schema", spec.CredentialSchema); err != nil {
 		return err
 	}
@@ -72,6 +76,47 @@ func ValidateIntegrationTypeSpec(spec model.IntegrationTypeManifestSpec) error {
 	}
 	if err := validateIntegrationExecution(spec.Execution, spec.ActionCatalog, spec.ResourceTypes, spec.Extensions); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// NormalizeIntegrationCredentialPolicy applies compatibility defaults to an integration credential policy.
+func NormalizeIntegrationCredentialPolicy(policy model.IntegrationCredentialPolicySpec, schema model.IntegrationSchemaSpec) model.IntegrationCredentialPolicySpec {
+	policy.Source = strings.ToLower(strings.TrimSpace(policy.Source))
+	if policy.Source == "" {
+		switch strings.ToLower(strings.TrimSpace(schema.Mode)) {
+		case "none":
+			policy.Source = "none"
+		default:
+			policy.Source = "inline_or_secret_ref"
+		}
+	}
+	return policy
+}
+
+// ValidateIntegrationCredentialPolicy validates one integration_type credential policy.
+func ValidateIntegrationCredentialPolicy(policy model.IntegrationCredentialPolicySpec, schema model.IntegrationSchemaSpec) error {
+	policy = NormalizeIntegrationCredentialPolicy(policy, schema)
+	if !slices.Contains(supportedCredentialPolicySources, policy.Source) {
+		return fmt.Errorf("integration_type credential_policy source %q is unsupported", policy.Source)
+	}
+
+	schemaMode := strings.ToLower(strings.TrimSpace(schema.Mode))
+	if schemaMode == "" {
+		schemaMode = "none"
+	}
+	if policy.Source == "none" && schemaMode != "none" {
+		return fmt.Errorf("integration_type credential_policy source %q requires credential_schema mode \"none\"", policy.Source)
+	}
+	if schemaMode == "none" && policy.Source != "none" {
+		return fmt.Errorf("integration_type credential_schema mode %q requires credential_policy source \"none\"", schema.Mode)
+	}
+	if policy.MaterializeInline && policy.Source == "none" {
+		return fmt.Errorf("integration_type credential_policy cannot materialize inline credentials when source is none")
+	}
+	if policy.MaterializeInline && policy.Source == "inline" {
+		return fmt.Errorf("integration_type credential_policy cannot materialize inline credentials when source is inline")
 	}
 
 	return nil

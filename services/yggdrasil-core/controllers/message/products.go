@@ -666,6 +666,9 @@ func resolveIntegrationInstance(
 	if err != nil {
 		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, fmt.Errorf("parse integration type spec: %w", err)
 	}
+	if err := manifestengine.ValidateHydratedIntegrationInstanceInputs(instanceSpec, typeSpec); err != nil {
+		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, err
+	}
 
 	if err := preflightIntegrationInstanceHealth(
 		ctx,
@@ -673,7 +676,7 @@ func resolveIntegrationInstance(
 		instanceManifest,
 		instanceSpec,
 		typeManifest,
-		model.IntegrationRuntimeCheckKindDescribeHandshake,
+		model.IntegrationRuntimeCheckKindOverall,
 	); err != nil {
 		return model.Manifest{}, model.IntegrationInstanceManifestSpec{}, model.Manifest{}, model.IntegrationTypeManifestSpec{}, err
 	}

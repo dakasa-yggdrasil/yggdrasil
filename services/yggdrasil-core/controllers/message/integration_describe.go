@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"reflect"
 	"slices"
 	"strings"
@@ -60,6 +61,10 @@ func verifyResolvedIntegrationType(
 	cacheKey := integrationDescribeCacheKey(instanceManifest, typeManifest, typeSpec, instanceSpec)
 	if integrationDescribeRecentlyVerified(cacheKey) {
 		return nil
+	}
+
+	if err := verifyIntegrationTransportConnectivity(ctx, conn, db, instanceManifest, typeManifest, instanceSpec, typeSpec); err != nil {
+		return err
 	}
 
 	timeout := time.Duration(typeSpec.Adapter.TimeoutSeconds) * time.Second
@@ -150,6 +155,148 @@ func verifyResolvedIntegrationType(
 	return nil
 }
 
+func verifyIntegrationTransportConnectivity(
+	ctx context.Context,
+	conn *amqp.Connection,
+	db *sql.DB,
+	instanceManifest model.Manifest,
+	typeManifest model.Manifest,
+	instanceSpec model.IntegrationInstanceManifestSpec,
+	typeSpec model.IntegrationTypeManifestSpec,
+) error {
+	details := integrationTransportConnectivityStateDetails(instanceManifest, typeManifest, typeSpec)
+	message, liveDetails, err := checkIntegrationTransportConnectivity(ctx, conn, instanceSpec, typeSpec)
+	for key, value := range liveDetails {
+		details[key] = value
+	}
+	if err != nil {
+		status := model.IntegrationRuntimeStatusUnreachable
+		if strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "unsupported") ||
+			strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "required") {
+			status = model.IntegrationRuntimeStatusContractMismatch
+		}
+		return failIntegrationRuntimeCheck(
+			ctx,
+			db,
+			instanceManifest,
+			typeManifest,
+			model.IntegrationRuntimeCheckKindTransportConnectivity,
+			status,
+			err,
+			details,
+		)
+	}
+
+	if _, err := repository.UpsertIntegrationRuntimeState(
+		ctx,
+		db,
+		instanceManifest,
+		typeManifest,
+		model.IntegrationRuntimeCheckKindTransportConnectivity,
+		model.IntegrationRuntimeStatusHealthy,
+		message,
+		details,
+	); err != nil {
+		return fmt.Errorf(
+			"record transport connectivity state for integration instance %s/%s: %w",
+			instanceManifest.Metadata.Namespace,
+			instanceManifest.Metadata.Name,
+			err,
+		)
+	}
+	return nil
+}
+
+func checkIntegrationTransportConnectivity(
+	ctx context.Context,
+	conn *amqp.Connection,
+	instanceSpec model.IntegrationInstanceManifestSpec,
+	typeSpec model.IntegrationTypeManifestSpec,
+) (string, map[string]any, error) {
+	switch strings.ToLower(strings.TrimSpace(typeSpec.Adapter.Transport)) {
+	case "http_json":
+		return checkHTTPJSONTransportConnectivity(ctx, instanceSpec, typeSpec)
+	case "rabbitmq":
+		return checkRabbitMQTransportConnectivity(conn, typeSpec)
+	default:
+		return "", nil, fmt.Errorf("integration transport %q is unsupported", typeSpec.Adapter.Transport)
+	}
+}
+
+func checkHTTPJSONTransportConnectivity(
+	ctx context.Context,
+	instanceSpec model.IntegrationInstanceManifestSpec,
+	typeSpec model.IntegrationTypeManifestSpec,
+) (string, map[string]any, error) {
+	baseURL, err := adapterBaseURL(instanceSpec)
+	if err != nil {
+		return "", nil, err
+	}
+
+	targetURL := baseURL
+	healthEndpoint := adapterEndpointForCapability(typeSpec.Adapter.Endpoints, "health")
+	if healthEndpoint != "" {
+		targetURL, err = resolveAdapterEndpointURL(baseURL, healthEndpoint)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return "", nil, fmt.Errorf("build connectivity request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", map[string]any{"target_url": targetURL}, fmt.Errorf("call connectivity endpoint %q: %w", targetURL, err)
+	}
+	defer resp.Body.Close()
+
+	details := map[string]any{
+		"target_url":   targetURL,
+		"status_code":  resp.StatusCode,
+		"health_route": strings.TrimSpace(healthEndpoint),
+	}
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return "", details, fmt.Errorf("connectivity endpoint %q returned %d", targetURL, resp.StatusCode)
+	}
+
+	return fmt.Sprintf("transport connectivity healthy via %s", targetURL), details, nil
+}
+
+func checkRabbitMQTransportConnectivity(
+	conn *amqp.Connection,
+	typeSpec model.IntegrationTypeManifestSpec,
+) (string, map[string]any, error) {
+	queue := firstNonEmpty(
+		strings.TrimSpace(typeSpec.Adapter.Queues.Health),
+		strings.TrimSpace(typeSpec.Adapter.Queues.Describe),
+		strings.TrimSpace(typeSpec.Adapter.Queues.Execute),
+		strings.TrimSpace(typeSpec.Adapter.Queues.Read),
+		strings.TrimSpace(typeSpec.Adapter.Queues.Discover),
+		strings.TrimSpace(typeSpec.Adapter.Queues.Sync),
+	)
+	if queue == "" {
+		return "", nil, fmt.Errorf("adapter queue is required for rabbitmq transport connectivity")
+	}
+	if conn == nil {
+		return "", map[string]any{"queue": queue}, fmt.Errorf("rabbitmq connection is not configured")
+	}
+
+	channel, err := conn.Channel()
+	if err != nil {
+		return "", map[string]any{"queue": queue}, fmt.Errorf("open rabbitmq channel: %w", err)
+	}
+	defer channel.Close()
+
+	if _, err := channel.QueueInspect(queue); err != nil {
+		return "", map[string]any{"queue": queue}, fmt.Errorf("inspect rabbitmq queue %q: %w", queue, err)
+	}
+
+	return fmt.Sprintf("transport connectivity healthy through queue %s", queue), map[string]any{"queue": queue}, nil
+}
+
 func integrationDescribeStateDetails(
 	instanceManifest model.Manifest,
 	typeManifest model.Manifest,
@@ -163,6 +310,23 @@ func integrationDescribeStateDetails(
 		"adapter_version":  strings.TrimSpace(typeSpec.Adapter.Version),
 		"queue":            strings.TrimSpace(queue),
 		"endpoint":         strings.TrimSpace(endpoint),
+		"transport":        strings.TrimSpace(typeSpec.Adapter.Transport),
+	}
+	if instanceManifest.Kind == "integration_instance" {
+		details["integration_instance"] = manifestReferenceFromRecord(instanceManifest)
+	}
+	return details
+}
+
+func integrationTransportConnectivityStateDetails(
+	instanceManifest model.Manifest,
+	typeManifest model.Manifest,
+	typeSpec model.IntegrationTypeManifestSpec,
+) map[string]any {
+	details := map[string]any{
+		"integration_type": manifestReferenceFromRecord(typeManifest),
+		"provider":         strings.TrimSpace(typeSpec.Provider),
+		"adapter_version":  strings.TrimSpace(typeSpec.Adapter.Version),
 		"transport":        strings.TrimSpace(typeSpec.Adapter.Transport),
 	}
 	if instanceManifest.Kind == "integration_instance" {
@@ -254,6 +418,40 @@ func failIntegrationDescribeHandshake(
 	return cause
 }
 
+func failIntegrationRuntimeCheck(
+	ctx context.Context,
+	db *sql.DB,
+	instanceManifest model.Manifest,
+	typeManifest model.Manifest,
+	checkKind string,
+	status string,
+	cause error,
+	details map[string]any,
+) error {
+	if cause == nil {
+		return nil
+	}
+	if db == nil {
+		return cause
+	}
+
+	recordedDetails := cloneAuthorizationInput(details)
+	recordedDetails["error"] = cause.Error()
+	if _, err := repository.UpsertIntegrationRuntimeState(
+		ctx,
+		db,
+		instanceManifest,
+		typeManifest,
+		checkKind,
+		status,
+		cause.Error(),
+		recordedDetails,
+	); err != nil {
+		return fmt.Errorf("%w (also failed to record integration runtime state: %v)", cause, err)
+	}
+	return cause
+}
+
 func integrationTypeSpecFromDescribeResponse(response model.AdapterDescribeResponse) model.IntegrationTypeManifestSpec {
 	return model.IntegrationTypeManifestSpec{
 		Provider:         response.Provider,
@@ -313,6 +511,7 @@ func compareIntegrationTypeSpec(expected model.IntegrationTypeManifestSpec, actu
 
 func normalizeIntegrationTypeSpecForComparison(spec model.IntegrationTypeManifestSpec) model.IntegrationTypeManifestSpec {
 	spec.Provider = normalizeIntegrationToken(spec.Provider)
+	spec.CredentialPolicy = model.IntegrationCredentialPolicySpec{}
 	spec.Adapter = normalizeIntegrationAdapterSpec(spec.Adapter)
 	spec.Capabilities = normalizeIntegrationTokens(spec.Capabilities)
 	spec.CredentialSchema = normalizeIntegrationSchemaSpec(spec.CredentialSchema)
@@ -469,8 +668,11 @@ func integrationDescribeCacheKey(
 		instanceChecksum,
 		typeManifest.ID.String(),
 		typeManifest.Checksum,
+		strings.TrimSpace(typeSpec.Adapter.Transport),
 		strings.TrimSpace(typeSpec.Adapter.Version),
+		strings.TrimSpace(typeSpec.Adapter.Queues.Health),
 		strings.TrimSpace(typeSpec.Adapter.Queues.Describe),
+		strings.TrimSpace(typeSpec.Adapter.Endpoints.Health),
 		strings.TrimSpace(typeSpec.Adapter.Endpoints.Describe),
 		strings.TrimSpace(fmt.Sprint(instanceSpec.Config["base_url"])),
 	}, ":")
@@ -490,4 +692,14 @@ func markIntegrationDescribeVerified(cacheKey string) {
 	integrationDescribeCacheMu.Lock()
 	integrationDescribeCache[cacheKey] = time.Now().UTC()
 	integrationDescribeCacheMu.Unlock()
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
