@@ -27,6 +27,7 @@ task env:init
 task up
 task bootstrap:core
 task open:console
+task build:images
 ```
 
 Se quiser instalar integrations de forma interativa:

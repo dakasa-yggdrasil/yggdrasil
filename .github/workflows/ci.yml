@@ -39,6 +39,9 @@ jobs:
       - name: Run live smoke checks
         run: task smoke
 
+      - name: Build production images
+        run: task build:images
+
       - name: Stop local stack
         if: always()
         run: task down

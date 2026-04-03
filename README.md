@@ -139,6 +139,12 @@ Rode o smoke end-to-end do produto:
 task smoke
 ```
 
+Valide também os artefatos de produção:
+
+```bash
+task build:images
+```
+
 Abra o console:
 
 ```bash
@@ -184,6 +190,8 @@ ela faz isso através do core. O vínculo de integrations continua sempre sendo 
 
 Para detalhes de fluxo local, variáveis e convenções, veja
 [`docs/local-development.md`](/Users/dakasa/projects/yggdrasil/docs/local-development.md).
+Para os guardrails de runtime e o checklist de produção, veja
+[`docs/production-readiness.md`](/Users/dakasa/projects/yggdrasil/docs/production-readiness.md).
 
 ## Boas práticas adotadas
 

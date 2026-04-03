@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -128,6 +129,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", server.handleRoot)
 	mux.HandleFunc("GET /healthz", server.handleHealthz)
+	mux.HandleFunc("GET /readyz", server.handleReadyz)
 	mux.HandleFunc("POST /api/v1/auth/passwords", server.handleAuthPasswordUpsert)
 	mux.HandleFunc("POST /api/v1/auth/login", server.handleAuthLogin)
 	mux.HandleFunc("POST /api/v1/auth/third-party/login", server.handleAuthThirdPartyLogin)
@@ -236,6 +238,34 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	if err := s.db.PingContext(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"status": "not_ready",
+			"reason": "postgres_unavailable",
+			"error":  strings.TrimSpace(err.Error()),
+		})
+		return
+	}
+
+	if strings.TrimSpace(os.Getenv("BROKER_URL")) != "" {
+		if s.rabbitmq == nil || s.rabbitmq.IsClosed() {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"status": "not_ready",
+				"reason": "rabbitmq_unavailable",
+			})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ready",
+	})
 }
 
 func (s *Server) handleIntegrationCatalogList(w http.ResponseWriter, r *http.Request) {

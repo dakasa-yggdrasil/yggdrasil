@@ -1,0 +1,10 @@
+---
+description: Yggdrasil product monorepo rules
+alwaysApply: true
+---
+
+- `yggdrasil-core` is the source of truth.
+- Surfaces are thin edges, not domain owners.
+- Preserve service and submodule boundaries.
+- Validate architectural and runtime changes with product-level tasks.
+- Keep manifests, docs, and tests aligned with code.

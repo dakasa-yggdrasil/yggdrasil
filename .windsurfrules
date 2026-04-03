@@ -1,0 +1,5 @@
+This is the Yggdrasil product monorepo.
+Keep authority in `yggdrasil-core`.
+Keep surfaces thin and replaceable.
+Run architecture and smoke validation for runtime changes.
+Update manifests, docs, and tests together.

@@ -81,6 +81,14 @@ tasks:
       - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh restart yggdrasil-core yggdrasil-auth-surface yggdrasil-console
       - ./scripts/smoke.sh
 
+  build:images:
+    desc: Build production images for the core and reference surfaces
+    deps: [env:init]
+    cmds:
+      - docker build -t yggdrasil-core:local ./services/yggdrasil-core
+      - docker build -t yggdrasil-auth-surface:local ./surfaces/yggdrasil-auth-surface
+      - docker build -t yggdrasil-console:local ./surfaces/yggdrasil-console
+
   integrations:list:
     desc: List installable integrations from the workspace catalog
     cmds:

@@ -57,6 +57,11 @@ tasks:
     cmds:
       - docker compose --project-name {{.PROJECT_NAME}} {{.COMPOSE_ARGS}} run --rm {{.SERVICE_NAME}} sh -lc "/usr/local/go/bin/go test ./..."
 
+  build:image:
+    deps: [env:init]
+    cmds:
+      - docker build -t yggdrasil-core:local .
+
   migrate:
     deps: [up]
     cmds:

@@ -184,6 +184,8 @@ The direct core auth endpoints are:
 - `DELETE /api/v1/auth/providers/{provider}`
 - `GET /api/v1/auth/session`
 - `POST /api/v1/auth/logout`
+- `GET /healthz`
+- `GET /readyz`
 
 Additional direct core endpoints now include:
 
@@ -441,6 +443,7 @@ That keeps the architecture clean:
 - `registered` comes from manifests stored in the core
 - `discovered` comes from optional scanners such as GitHub, GitLab, filesystem, or future registries
 - surfaces never scan providers directly; they only consume the core response
+- production traffic should prefer `GET /readyz`, which verifies database reachability and transport availability
 
 The minimum recommended adapter RPC surface is:
 

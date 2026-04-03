@@ -38,7 +38,7 @@ wait_for_url() {
   local sleep_seconds="${3:-2}"
 
   for ((i = 1; i <= attempts; i++)); do
-    if curl -fsS "${url}" >/dev/null; then
+    if curl -fsS -o /dev/null "${url}" 2>/dev/null; then
       return 0
     fi
     sleep "${sleep_seconds}"
@@ -49,9 +49,9 @@ wait_for_url() {
 }
 
 echo "Checking service health endpoints..."
-wait_for_url "${core_url}/healthz"
-wait_for_url "${auth_url}/healthz"
-wait_for_url "${console_url}/"
+wait_for_url "${core_url}/readyz"
+wait_for_url "${auth_url}/readyz"
+wait_for_url "${console_url}/healthz"
 
 secret_name="smoke-$(date +%s)"
 echo "Creating managed secret ${secret_name}..."
