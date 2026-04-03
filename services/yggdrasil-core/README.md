@@ -389,6 +389,7 @@ The current section convention is:
 - `rabbitmq` for `vhost`, `user`, `permission`, `queue`, `exchange`
 - `grafana` for `dashboard`, `datasource`, `folder`, `alert`
 - `github` for repositories, workflows, teams, environments, secrets
+- `aws` for S3, ECR, and Secrets Manager governance
 - `gcp` for build runtimes plus Artifact Registry, Storage, and Secret Manager governance
 - `kubernetes` for cluster object apply and observation
 

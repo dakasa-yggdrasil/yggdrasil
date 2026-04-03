@@ -1,0 +1,150 @@
+{
+  "apiVersion": "yggdrasil.io/v1alpha1",
+  "kind": "integration_type",
+  "metadata": {
+    "name": "aws",
+    "namespace": "global",
+    "description": "Bootstrap integration type for the AWS governance plugin.",
+    "labels": {
+      "bootstrap_source": "integration-aws",
+      "provider": "aws",
+      "yggdrasil.io/catalog-domain": "aws",
+      "yggdrasil.io/catalog-section": "operations",
+      "yggdrasil.io/catalog-entry": "api"
+    }
+  },
+  "spec": {
+    "provider": "aws",
+    "adapter": {
+      "transport": "rabbitmq",
+      "version": "1.0.0",
+      "queues": {
+        "describe": "yggdrasil.adapter.aws.describe",
+        "execute": "yggdrasil.adapter.aws.execute"
+      },
+      "timeout_seconds": 90
+    },
+    "capabilities": [
+      "describe",
+      "execute"
+    ],
+    "credential_schema": {
+      "mode": "inline",
+      "properties": {
+        "access_key_id": {
+          "type": "string",
+          "description": "AWS access key id used by governance operations.",
+          "secret": true
+        },
+        "secret_access_key": {
+          "type": "string",
+          "description": "AWS secret access key used by governance operations.",
+          "secret": true
+        },
+        "session_token": {
+          "type": "string",
+          "description": "Optional AWS session token for temporary credentials.",
+          "secret": true
+        },
+        "profile": {
+          "type": "string",
+          "description": "Optional shared config profile name when the worker should use local AWS profiles."
+        }
+      }
+    },
+    "instance_schema": {
+      "mode": "inline",
+      "properties": {
+        "default_region": {
+          "type": "string",
+          "description": "Default AWS region for governance operations.",
+          "default": "us-east-1"
+        },
+        "default_account_id": {
+          "type": "string",
+          "description": "Optional fallback AWS account identifier used for metadata and normalization."
+        },
+        "default_tags": {
+          "type": "object",
+          "description": "Default tags applied when an operation omits tags."
+        }
+      }
+    },
+    "resource_types": [
+      {
+        "name": "s3_bucket",
+        "canonical_prefix": "thirdparty.aws.s3.bucket",
+        "identity_template": "s3_bucket.{region}.{bucket_name}",
+        "discoverable": false,
+        "default_actions": [
+          "ensure_s3_bucket"
+        ]
+      },
+      {
+        "name": "ecr_repository",
+        "canonical_prefix": "thirdparty.aws.ecr.repository",
+        "identity_template": "ecr_repository.{region}.{repository_name}",
+        "discoverable": false,
+        "default_actions": [
+          "ensure_ecr_repository"
+        ]
+      },
+      {
+        "name": "secret",
+        "canonical_prefix": "thirdparty.aws.secrets_manager.secret",
+        "identity_template": "secret.{region}.{secret_name}",
+        "discoverable": false,
+        "default_actions": [
+          "upsert_secret_manager_secret"
+        ]
+      }
+    ],
+    "action_catalog": [
+      {
+        "name": "ensure_s3_bucket",
+        "description": "Ensure one S3 bucket exists and optionally apply tags or versioning.",
+        "resource_types": [
+          "s3_bucket"
+        ],
+        "idempotent": true
+      },
+      {
+        "name": "ensure_ecr_repository",
+        "description": "Ensure one ECR repository exists and optionally apply tags or scanning settings.",
+        "resource_types": [
+          "ecr_repository"
+        ],
+        "idempotent": true
+      },
+      {
+        "name": "upsert_secret_manager_secret",
+        "description": "Ensure one Secrets Manager secret exists and optionally write a new secret value.",
+        "resource_types": [
+          "secret"
+        ],
+        "idempotent": true
+      }
+    ],
+    "discovery": {
+      "mode": "push",
+      "cursor": "none"
+    },
+    "normalization": {
+      "external_id_path": "arn",
+      "name_path": "name",
+      "owner_path": "region",
+      "fallback_resource_prefix": "thirdparty.aws.custom"
+    },
+    "execution": {
+      "supports_dry_run": false,
+      "idempotent_actions": [
+        "ensure_s3_bucket",
+        "ensure_ecr_repository",
+        "upsert_secret_manager_secret"
+      ]
+    },
+    "extensions": {
+      "allow_custom_actions": true
+    }
+  }
+}

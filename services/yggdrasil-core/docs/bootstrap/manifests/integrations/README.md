@@ -6,6 +6,8 @@ Current bootstrap integrations are already organized around the plugin catalog c
 
 Current catalog view:
 
+- `aws`
+  - `operations/api` -> `aws-integration-type.json`
 - `gcp`
   - `operations/api` -> `gcp-integration-type.json`
 - `github`
@@ -21,6 +23,7 @@ Current catalog view:
 
 Current bootstrap instances:
 
+- `aws-platform.json`
 - `kubernetes-platform-prod.json`
 - `github-caller.json`
 - `gcp-platform.json`
