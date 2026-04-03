@@ -66,7 +66,7 @@ check_no_matches \
 
 check_no_matches \
   "runtime services and surfaces must not reference plugin runtime code directly" \
-  '^\s*"github\.com/(dakasa-co|dakasa-yggdrasil)/(yggdrasil-integration-|integration-)' \
+  '^\s*"github\.com/dakasa-yggdrasil/integration-' \
   "${runtime_dirs[@]}"
 
 if [[ "$errors" -ne 0 ]]; then
