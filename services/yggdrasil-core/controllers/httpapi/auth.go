@@ -357,12 +357,103 @@ func (s *Server) handleThirdPartyAuthProviderUpsert(w http.ResponseWriter, r *ht
 		writeMappedError(w, err)
 		return
 	}
+	if err := s.materializeThirdPartyAuthProviderClientSecret(r.Context(), &req); err != nil {
+		writeMappedError(w, err)
+		return
+	}
 	provider, err := repository.UpsertThirdPartyAuthProvider(r.Context(), s.db, req)
 	if err != nil {
 		writeMappedError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"provider": provider})
+}
+
+func (s *Server) materializeThirdPartyAuthProviderClientSecret(
+	ctx context.Context,
+	req *model.UpsertThirdPartyAuthProviderRequest,
+) error {
+	if s == nil || req == nil {
+		return nil
+	}
+
+	clientSecret := strings.TrimSpace(req.ClientSecret)
+	if clientSecret == "" {
+		return nil
+	}
+
+	providerName := strings.ToLower(strings.TrimSpace(req.Name))
+	if providerName == "" {
+		return fmt.Errorf("third-party auth provider name is required")
+	}
+
+	namespace := "global"
+	name := fmt.Sprintf("auth-provider/%s/client-secret", providerName)
+	key := "value"
+
+	if ref := strings.TrimSpace(req.ClientSecretRef); ref != "" {
+		refNamespace, refName, refKey, err := parseManagedSecretWriteRef(ref)
+		if err != nil {
+			return fmt.Errorf("third-party auth provider client_secret_ref: %w", err)
+		}
+		namespace = refNamespace
+		name = refName
+		if refKey != "" {
+			key = refKey
+		}
+	}
+
+	secret, err := repository.UpsertManagedSecret(ctx, s.db, model.UpsertManagedSecretRequest{
+		Namespace: namespace,
+		Name:      name,
+		Status:    "active",
+		Data: map[string]string{
+			key: clientSecret,
+		},
+		Metadata: map[string]any{
+			"source_kind": "auth_provider",
+			"auth_provider": map[string]any{
+				"name": providerName,
+			},
+		},
+		Rotation: model.ManagedSecretRotationPolicy{Mode: "manual"},
+	})
+	if err != nil {
+		return err
+	}
+
+	req.ClientSecret = ""
+	req.ClientSecretRef = fmt.Sprintf("secret://%s/%s#%s", secret.Namespace, secret.Name, key)
+	return nil
+}
+
+func parseManagedSecretWriteRef(ref string) (namespace string, name string, key string, err error) {
+	ref = strings.TrimSpace(ref)
+	if !strings.HasPrefix(ref, "secret://") {
+		return "", "", "", fmt.Errorf("secret ref %q must use secret://", ref)
+	}
+
+	target := strings.TrimPrefix(ref, "secret://")
+	parts := strings.SplitN(target, "#", 2)
+	pathPart := strings.Trim(parts[0], "/")
+	if len(parts) == 2 {
+		key = strings.TrimSpace(parts[1])
+	}
+
+	pathSegments := strings.Split(pathPart, "/")
+	if len(pathSegments) < 2 {
+		return "", "", "", fmt.Errorf("secret ref %q must use secret://<namespace>/<name>[#key]", ref)
+	}
+
+	namespace = strings.ToLower(strings.TrimSpace(pathSegments[0]))
+	name = strings.ToLower(strings.TrimSpace(strings.Join(pathSegments[1:], "/")))
+	if namespace == "" || name == "" {
+		return "", "", "", fmt.Errorf("secret ref %q must use secret://<namespace>/<name>[#key]", ref)
+	}
+	if strings.TrimSpace(key) == "" {
+		key = "value"
+	}
+	return namespace, name, key, nil
 }
 
 func (s *Server) handleThirdPartyAuthProviderDelete(w http.ResponseWriter, r *http.Request) {

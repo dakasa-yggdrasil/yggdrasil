@@ -43,6 +43,7 @@ type UpsertThirdPartyAuthProviderRequest struct {
 	TokenURL         string         `json:"token_url,omitempty"`
 	UserInfoURL      string         `json:"userinfo_url,omitempty"`
 	ClientID         string         `json:"client_id,omitempty"`
+	ClientSecret     string         `json:"client_secret,omitempty"`
 	ClientSecretRef  string         `json:"client_secret_ref,omitempty"`
 	Scopes           []string       `json:"scopes,omitempty"`
 	AutoLinkByEmail  bool           `json:"auto_link_by_email,omitempty"`
