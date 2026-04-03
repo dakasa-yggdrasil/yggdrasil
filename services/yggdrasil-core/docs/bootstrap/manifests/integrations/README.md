@@ -24,6 +24,7 @@ Current catalog view:
 Current bootstrap instances:
 
 - `aws-platform.json`
+  - covers `S3`, `ECR`, `Secrets Manager`, `Route53`, `SES` and `SNS`
 - `kubernetes-platform-prod.json`
 - `github-caller.json`
 - `gcp-platform.json`

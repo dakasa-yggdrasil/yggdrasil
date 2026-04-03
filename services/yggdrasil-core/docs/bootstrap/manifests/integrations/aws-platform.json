@@ -22,6 +22,8 @@
     "credentials": {},
     "config": {
       "default_region": "us-east-1",
+      "default_email_from": "platform@example.com",
+      "default_sms_type": "Transactional",
       "default_tags": {
         "managed-by": "yggdrasil"
       }

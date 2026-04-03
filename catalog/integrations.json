@@ -8,7 +8,7 @@
       "domain": "aws",
       "section": "operations",
       "repo_url": "https://github.com/dakasa-yggdrasil/integration-aws.git",
-      "description": "Operations plugin for AWS governance across S3, ECR and Secrets Manager."
+      "description": "Operations plugin for AWS governance across S3, ECR, Secrets Manager, Route53, SES and SNS."
     },
     {
       "slug": "github",
