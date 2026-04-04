@@ -217,10 +217,10 @@ func runHeimdallGuardianSweep(
 			model.ExecuteIntegrationRequest{
 				Operation:  "auto_remediate_critical",
 				Capability: "auto_remediate_critical",
-			Input: map[string]any{
-				"ecosystem":       snapshot,
-				"guardian_policy": heimdallPolicyInput(policy),
-			},
+				Input: map[string]any{
+					"ecosystem":       snapshot,
+					"guardian_policy": heimdallPolicyInput(policy),
+				},
 				Metadata: map[string]any{
 					"source": "core.heimdall.auto_heal",
 				},
@@ -269,10 +269,10 @@ func runHeimdallGuardianSweep(
 			model.ExecuteIntegrationRequest{
 				Operation:  "optimize_cost",
 				Capability: "optimize_cost",
-			Input: map[string]any{
-				"ecosystem":       snapshot,
-				"guardian_policy": heimdallPolicyInput(policy),
-			},
+				Input: map[string]any{
+					"ecosystem":       snapshot,
+					"guardian_policy": heimdallPolicyInput(policy),
+				},
 				Metadata: map[string]any{
 					"source": "core.heimdall.optimize_cost",
 				},
@@ -752,6 +752,12 @@ func heimdallIntegrationIncidents(health model.IntegrationInstanceHealth, item m
 	if health.RuntimeState == nil {
 		return nil
 	}
+	evidence := mergeStringAnyMaps(cloneAuthorizationInput(health.RuntimeState.Details), map[string]any{
+		"type_name":             health.IntegrationType.Name,
+		"type_namespace":        health.IntegrationType.Namespace,
+		"repository":            anyString(item["repository"]),
+		"guardian_support_mode": anyString(item["guardian_support_mode"]),
+	})
 
 	status := strings.ToLower(strings.TrimSpace(health.RuntimeState.Status))
 	severity := ""
@@ -782,7 +788,7 @@ func heimdallIntegrationIncidents(health model.IntegrationInstanceHealth, item m
 			"component_name":      health.IntegrationInstance.Name,
 			"component_namespace": health.IntegrationInstance.Namespace,
 			"repository":          anyString(item["repository"]),
-			"evidence":            cloneAuthorizationInput(health.RuntimeState.Details),
+			"evidence":            cloneAuthorizationInput(evidence),
 		})
 	}
 
@@ -797,7 +803,7 @@ func heimdallIntegrationIncidents(health model.IntegrationInstanceHealth, item m
 			"component_name":      health.IntegrationInstance.Name,
 			"component_namespace": health.IntegrationInstance.Namespace,
 			"repository":          anyString(item["repository"]),
-			"evidence":            cloneAuthorizationInput(health.RuntimeState.Details),
+			"evidence":            cloneAuthorizationInput(evidence),
 		})
 	}
 
@@ -812,7 +818,7 @@ func heimdallIntegrationIncidents(health model.IntegrationInstanceHealth, item m
 			"component_name":      health.IntegrationInstance.Name,
 			"component_namespace": health.IntegrationInstance.Namespace,
 			"repository":          anyString(item["repository"]),
-			"evidence":            cloneAuthorizationInput(health.RuntimeState.Details),
+			"evidence":            cloneAuthorizationInput(evidence),
 		})
 	}
 
@@ -827,7 +833,7 @@ func heimdallIntegrationIncidents(health model.IntegrationInstanceHealth, item m
 			"component_name":      health.IntegrationInstance.Name,
 			"component_namespace": health.IntegrationInstance.Namespace,
 			"repository":          anyString(item["repository"]),
-			"evidence":            cloneAuthorizationInput(health.RuntimeState.Details),
+			"evidence":            cloneAuthorizationInput(evidence),
 		})
 	}
 
@@ -842,7 +848,7 @@ func heimdallIntegrationIncidents(health model.IntegrationInstanceHealth, item m
 			"component_name":      health.IntegrationInstance.Name,
 			"component_namespace": health.IntegrationInstance.Namespace,
 			"repository":          anyString(item["repository"]),
-			"evidence":            cloneAuthorizationInput(health.RuntimeState.Details),
+			"evidence":            cloneAuthorizationInput(evidence),
 		})
 	}
 
@@ -1075,13 +1081,13 @@ func createHeimdallApprovalRequest(
 			Namespace:   "global",
 			Description: summary,
 			Labels: map[string]string{
-				"guardian":         "heimdall",
-				"component_kind":   componentKind,
-				"component_name":   componentName,
-				"component_ns":     componentNamespace,
-				"approval_status":  model.GuardianApprovalStatusPending,
-				"approval_source":  source,
-				"approval_action":  actionType,
+				"guardian":        "heimdall",
+				"component_kind":  componentKind,
+				"component_name":  componentName,
+				"component_ns":    componentNamespace,
+				"approval_status": model.GuardianApprovalStatusPending,
+				"approval_source": source,
+				"approval_action": actionType,
 			},
 		},
 		Spec: specRaw,
@@ -1779,6 +1785,45 @@ func heimdallActionEvidence(action map[string]any) map[string]any {
 	return map[string]any{}
 }
 
+func heimdallActionLearningMetadata(
+	action map[string]any,
+	incident map[string]any,
+	evidence map[string]any,
+) map[string]any {
+	componentKind := firstNonEmpty(anyString(action["component_kind"]), anyString(action["kind"]), anyString(incident["component_kind"]), anyString(incident["kind"]), "component")
+	componentNamespace := firstNonEmpty(anyString(action["component_namespace"]), anyString(action["namespace"]), anyString(incident["component_namespace"]), anyString(incident["namespace"]), "global")
+	componentName := firstNonEmpty(anyString(action["component_name"]), anyString(action["name"]), anyString(incident["component_name"]), anyString(incident["name"]), "unknown")
+	actionType := firstNonEmpty(anyString(action["type"]), "action")
+	repository := firstNonEmpty(anyString(action["repository"]), anyString(incident["repository"]), anyString(evidence["repository"]))
+	typeNamespace := firstNonEmpty(anyString(evidence["type_namespace"]), "global")
+	typeName := anyString(evidence["type_name"])
+	runtimeKind := anyString(evidence["runtime_kind"])
+
+	providerKey := ""
+	switch {
+	case typeName != "":
+		providerKey = fmt.Sprintf("integration_type:%s/%s", typeNamespace, typeName)
+	case runtimeKind != "":
+		providerKey = fmt.Sprintf("runtime_kind:%s", strings.ToLower(strings.TrimSpace(runtimeKind)))
+	case repository != "":
+		providerKey = fmt.Sprintf("repository:%s", strings.ToLower(strings.TrimSpace(repository)))
+	default:
+		providerKey = fmt.Sprintf("component_kind:%s", strings.ToLower(strings.TrimSpace(componentKind)))
+	}
+
+	return map[string]any{
+		"component_key":     heimdallComponentKey(componentKind, componentNamespace, componentName),
+		"action_type":       actionType,
+		"repository":        repository,
+		"provider_key":      providerKey,
+		"incident_category": firstNonEmpty(anyString(incident["category"]), "incident"),
+		"incident_severity": firstNonEmpty(anyString(incident["severity"]), "unknown"),
+		"type_name":         typeName,
+		"type_namespace":    typeNamespace,
+		"runtime_kind":      runtimeKind,
+	}
+}
+
 func createHeimdallPendingApprovalMemory(
 	ctx context.Context,
 	db *sql.DB,
@@ -1807,6 +1852,7 @@ func createHeimdallPendingApprovalMemory(
 			"requested_at":  now.Format(time.RFC3339),
 		},
 	})
+	spec.Metadata = mergeStringAnyMaps(spec.Metadata, heimdallActionLearningMetadata(spec.Action, spec.Incident, spec.Evidence))
 
 	return createHeimdallGuardianMemory(ctx, db, normalizeHeimdallMemoryName(componentKind, componentName, actionType, now), spec)
 }
@@ -1864,6 +1910,7 @@ func ensureHeimdallExecutionMemory(
 			"autonomy_mode": policy.Autonomy.Mode,
 		},
 	})
+	spec.Metadata = mergeStringAnyMaps(spec.Metadata, heimdallActionLearningMetadata(spec.Action, spec.Incident, spec.Evidence))
 
 	return createHeimdallGuardianMemory(ctx, db, normalizeHeimdallMemoryName(componentKind, componentName, actionType, now), spec)
 }
@@ -1883,6 +1930,7 @@ func finalizeHeimdallExecutionMemory(
 	spec.Action = cloneAuthorizationInput(action)
 	spec.Incident = heimdallIncidentFromAction(action)
 	spec.Evidence = heimdallActionEvidence(action)
+	spec.Metadata = mergeStringAnyMaps(spec.Metadata, heimdallActionLearningMetadata(spec.Action, spec.Incident, spec.Evidence))
 	spec.Execution.CompletedAt = time.Now().UTC().Format(time.RFC3339)
 	if executionErr != nil {
 		spec.Status = model.GuardianMemoryStatusExecutionFailed
@@ -1994,13 +2042,13 @@ func updateHeimdallGuardianMemory(
 
 func heimdallGuardianMemoryLabels(spec model.GuardianMemoryManifestSpec) map[string]string {
 	labels := map[string]string{
-		"guardian":        "heimdall",
-		"memory_status":   spec.Status,
-		"component_kind":  spec.ComponentKind,
-		"component_name":  spec.ComponentName,
-		"component_ns":    spec.ComponentNamespace,
-		"memory_source":   spec.Source,
-		"action_type":     strings.TrimSpace(anyString(spec.Action["type"])),
+		"guardian":       "heimdall",
+		"memory_status":  spec.Status,
+		"component_kind": spec.ComponentKind,
+		"component_name": spec.ComponentName,
+		"component_ns":   spec.ComponentNamespace,
+		"memory_source":  spec.Source,
+		"action_type":    strings.TrimSpace(anyString(spec.Action["type"])),
 	}
 	for key, value := range labels {
 		labels[key] = strings.TrimSpace(value)
@@ -2135,6 +2183,7 @@ func heimdallGuardianMemoryItems(memories []heimdallGuardianMemory) []map[string
 			"action":              cloneAuthorizationInput(memory.Spec.Action),
 			"incident":            cloneAuthorizationInput(memory.Spec.Incident),
 			"evidence":            cloneAuthorizationInput(memory.Spec.Evidence),
+			"metadata":            cloneAuthorizationInput(memory.Spec.Metadata),
 			"execution": map[string]any{
 				"attempted_at": memory.Spec.Execution.AttemptedAt,
 				"completed_at": memory.Spec.Execution.CompletedAt,
@@ -2255,9 +2304,9 @@ func heimdallPolicyInput(policy model.GuardianPolicyManifestSpec) map[string]any
 			"allow_direct_push":             policy.RepositoryAutomation.AllowDirectPush,
 		},
 		"cost_optimization": map[string]any{
-			"enabled":                            policy.CostOptimization.Enabled,
+			"enabled":                           policy.CostOptimization.Enabled,
 			"min_estimated_monthly_savings_usd": policy.CostOptimization.MinEstimatedMonthlySavingsUSD,
-			"allow_rightsize":                    policy.CostOptimization.AllowRightsize,
+			"allow_rightsize":                   policy.CostOptimization.AllowRightsize,
 		},
 		"autonomy": map[string]any{
 			"mode":               policy.Autonomy.Mode,

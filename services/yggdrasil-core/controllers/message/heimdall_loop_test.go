@@ -13,6 +13,10 @@ func TestHeimdallIntegrationIncidentsAddsOOMCapacityIncident(t *testing.T) {
 			Namespace: "global",
 			Name:      "heimdall-guardian",
 		},
+		IntegrationType: model.ManifestReference{
+			Namespace: "global",
+			Name:      "heimdall",
+		},
 		RuntimeState: &model.IntegrationRuntimeState{
 			Status:  model.IntegrationRuntimeStatusUnreachable,
 			Message: "container exited with OOMKilled",
@@ -38,6 +42,48 @@ func TestHeimdallIntegrationIncidentsAddsOOMCapacityIncident(t *testing.T) {
 	}
 	if !foundCapacity {
 		t.Fatal("expected capacity incident for oom-killed runtime")
+	}
+}
+
+func TestHeimdallIntegrationIncidentsEnrichEvidenceWithProviderContext(t *testing.T) {
+	health := model.IntegrationInstanceHealth{
+		IntegrationInstance: model.ManifestReference{
+			Namespace: "global",
+			Name:      "integration-github-prod",
+		},
+		IntegrationType: model.ManifestReference{
+			Namespace: "global",
+			Name:      "github",
+		},
+		RuntimeState: &model.IntegrationRuntimeState{
+			Status:  model.IntegrationRuntimeStatusUnreachable,
+			Message: "adapter timed out",
+			Details: map[string]any{
+				"restart_count": 4,
+			},
+		},
+	}
+
+	incidents := heimdallIntegrationIncidents(health, map[string]any{
+		"repository":            "dakasa-yggdrasil/integration-github",
+		"guardian_support_mode": "lightweight",
+	})
+	if len(incidents) == 0 {
+		t.Fatal("incidents = 0, want at least one")
+	}
+
+	evidence, ok := incidents[0]["evidence"].(map[string]any)
+	if !ok {
+		t.Fatalf("incident evidence type = %T, want map[string]any", incidents[0]["evidence"])
+	}
+	if got := anyString(evidence["type_name"]); got != "github" {
+		t.Fatalf("type_name = %q, want github", got)
+	}
+	if got := anyString(evidence["type_namespace"]); got != "global" {
+		t.Fatalf("type_namespace = %q, want global", got)
+	}
+	if got := anyString(evidence["repository"]); got != "dakasa-yggdrasil/integration-github" {
+		t.Fatalf("repository = %q, want dakasa-yggdrasil/integration-github", got)
 	}
 }
 
