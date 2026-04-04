@@ -60,5 +60,5 @@ jobs:
       - name: Verify toolchain
         run: task doctor
 
-      - name: Validate installation manager and remote stack end-to-end
+      - name: Validate installation manager and remote stack end-to-end through console/auth
         run: task install:smoke

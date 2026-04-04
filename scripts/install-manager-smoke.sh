@@ -14,6 +14,27 @@ RUNTIME_SMOKE_SERVICES=(
   "integration-grafana"
 )
 
+cleanup_stale_install_smoke_projects() {
+  if ! command -v docker >/dev/null 2>&1; then
+    return
+  fi
+
+  local containers networks volumes
+  containers="$(docker ps -aq --filter name=ygg-install-smoke- || true)"
+  networks="$(docker network ls -q --filter name=ygg-install-smoke- || true)"
+  volumes="$(docker volume ls -q --filter name=ygg-install-smoke- || true)"
+
+  if [ -n "$containers" ]; then
+    docker rm -f $containers >/dev/null 2>&1 || true
+  fi
+  if [ -n "$networks" ]; then
+    docker network rm $networks >/dev/null 2>&1 || true
+  fi
+  if [ -n "$volumes" ]; then
+    docker volume rm -f $volumes >/dev/null 2>&1 || true
+  fi
+}
+
 cleanup() {
   if [ -d "$REPO_DIR/.git" ]; then
     COMPOSE_PROJECT_NAME="$PROJECT_NAME" "$REPO_DIR/scripts/docker-compose.sh" down --remove-orphans >/dev/null 2>&1 || true
@@ -99,6 +120,7 @@ run_isolated_product_smoke() {
 }
 
 echo "Preparing isolated workspace at $REPO_DIR"
+cleanup_stale_install_smoke_projects
 git clone "$ROOT" "$REPO_DIR" >/dev/null 2>&1
 
 # Overlay the current working tree so the smoke run validates local changes,

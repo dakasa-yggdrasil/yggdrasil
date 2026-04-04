@@ -54,6 +54,32 @@ wait_for_url "${core_url}/readyz"
 wait_for_url "${auth_url}/readyz"
 wait_for_url "${console_url}/healthz"
 
+echo "Checking console entrypoint..."
+curl -fsS "${console_url}" | python3 -c '
+import sys
+body = sys.stdin.read().lower()
+assert "<!doctype html" in body
+assert "yggdrasil" in body
+'
+
+echo "Reading integration catalog through console..."
+curl -fsS "${console_url}/api/v1/console/integration-catalog" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+domains = {item["domain"] for item in payload["domains"]}
+assert domains
+assert "aws" in domains
+assert "github" in domains
+'
+
+echo "Reading auth providers through console..."
+curl -fsS "${console_url}/api/v1/console/auth/providers" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+assert "providers" in payload
+assert isinstance(payload["providers"], list)
+'
+
 secret_name="smoke-$(date +%s)"
 echo "Creating managed secret ${secret_name}..."
 curl -fsS \
@@ -94,11 +120,11 @@ collaborator_email="smoke-${slug_suffix}@example.com"
 password="smoke-password-123"
 surface_name="smoke-surface-${slug_suffix}"
 
-echo "Registering discovered candidate ${surface_name}..."
+echo "Registering discovered candidate ${surface_name} through console..."
 curl -fsS \
   -X POST \
   -H "Content-Type: application/json" \
-  "${core_url}/api/v1/catalog/discovery/register" \
+  "${console_url}/api/v1/console/catalog-discovery/register" \
   -d "$(cat <<JSON
 {
   "registration": {
@@ -143,17 +169,17 @@ curl -fsS \
 JSON
 )" >/dev/null
 
-curl -fsS "${core_url}/api/v1/surfaces?namespace=global" | python3 -c '
+curl -fsS "${console_url}/api/v1/console/surfaces?namespace=global" | python3 -c '
 import json, sys
 payload = json.load(sys.stdin)
 assert any(item["metadata"]["name"].startswith("smoke-surface-") for item in payload["manifests"])
 '
 
-echo "Creating collaborator ${collaborator_slug}..."
+echo "Creating collaborator ${collaborator_slug} through console..."
 collaborator_response="$(curl -fsS \
   -X POST \
   -H "Content-Type: application/json" \
-  "${core_url}/api/v1/collaborators" \
+  "${console_url}/api/v1/console/collaborators" \
   -d "$(cat <<JSON
 {"slug":"${collaborator_slug}","display_name":"Smoke User","primary_email":"${collaborator_email}"}
 JSON
@@ -261,11 +287,11 @@ curl -fsS \
 JSON
 )" >/dev/null
 
-echo "Registering OIDC provider ${provider_name}..."
+echo "Registering OIDC provider ${provider_name} through console..."
 curl -fsS \
   -X POST \
   -H "Content-Type: application/json" \
-  "${core_url}/api/v1/auth/providers" \
+  "${console_url}/api/v1/console/auth/providers" \
   -d "$(cat <<JSON
 {
   "name": "${provider_name}",
@@ -282,7 +308,7 @@ curl -fsS \
 JSON
 )" >/dev/null
 
-curl -fsS "${core_url}/api/v1/auth/providers/${provider_name}" | python3 -c '
+curl -fsS "${console_url}/api/v1/console/auth/providers/${provider_name}" | python3 -c '
 import json, sys
 payload = json.load(sys.stdin)
 assert payload["provider"]["name"].startswith("oidc-smoke-")
