@@ -125,7 +125,7 @@ O Postgres compartilhado cria:
 - use `task config` antes do primeiro `task up` de um slice se estiver ajustando compose
 - use `task arch:check` quando mexer em fronteiras entre serviços
 - use `task bootstrap:core` depois do primeiro `task up` completo para carregar manifests bootstrap
-- use `task install:smoke` para validar, em um workspace isolado, que as surfaces de referência e todo o catálogo remoto de integrations instalam corretamente; o smoke também valida o compose agregado e sobe um subconjunto representativo de runtime dentro do monorepo
+- use `task install:smoke` para validar, em um workspace isolado, que as surfaces de referência e todo o catálogo remoto de integrations instalam corretamente; o smoke também valida o compose agregado, sobe um subconjunto representativo de runtime dentro do monorepo e executa o fluxo end-to-end de `core + auth + console`
 - use `task integrations:list` para ver o catálogo disponível
 - use `task surfaces:list` para ver o catálogo de surfaces disponível
 - use `task surfaces:install NAME=<slug>` para instalar uma surface de referência

@@ -63,6 +63,41 @@ wait_for_running_service() {
   return 1
 }
 
+build_service_image() {
+  local service="$1"
+
+  echo "Building ${service} image in isolated workspace..."
+  COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh build "$service"
+}
+
+warm_service_runtime() {
+  local service="$1"
+  local command="$2"
+
+  echo "Warming ${service} runtime dependencies in isolated workspace..."
+  COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh run --rm --no-deps "$service" sh -lc "$command"
+}
+
+run_isolated_product_smoke() {
+  local attempts="${1:-2}"
+
+  for ((i = 1; i <= attempts; i++)); do
+    if ./scripts/smoke.sh; then
+      return 0
+    fi
+
+    if (( i < attempts )); then
+      echo "isolated end-to-end smoke failed on attempt ${i}; waiting and retrying..."
+      wait_for_url "http://127.0.0.1:19080/readyz" 30 2 || true
+      wait_for_url "http://127.0.0.1:19090/readyz" 30 2 || true
+      wait_for_url "http://127.0.0.1:13080/healthz" 30 2 || true
+      sleep 5
+    fi
+  done
+
+  return 1
+}
+
 echo "Preparing isolated workspace at $REPO_DIR"
 git clone "$ROOT" "$REPO_DIR" >/dev/null 2>&1
 
@@ -104,6 +139,7 @@ NODE_IMAGE=node:22-bookworm
 
 CORE_HTTP_PORT=19080
 AUTH_SURFACE_PORT=19090
+YGGDRASIL_AUTH_SURFACE_PUBLIC_URL=http://127.0.0.1:19090
 CONSOLE_PORT=13080
 
 POSSIBLE_ORGS=dakasa-yggdrasil,DaKasa-Co
@@ -173,6 +209,18 @@ done
 echo "Validating compose in isolated workspace..."
 COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh config >/dev/null
 
+for service_and_command in \
+  "yggdrasil-core:/usr/local/go/bin/go mod download && /usr/local/go/bin/go build ./scripts/goose && /usr/local/go/bin/go build ." \
+  "yggdrasil-auth-surface:/usr/local/go/bin/go mod download && /usr/local/go/bin/go build ." \
+  "yggdrasil-console:npm ci"; do
+  service="${service_and_command%%:*}"
+  command="${service_and_command#*:}"
+  if ! warm_service_runtime "$service" "$command"; then
+    echo "failed to warm ${service} runtime dependencies in the isolated workspace" >&2
+    exit 1
+  fi
+done
+
 echo "Starting shared infra in isolated workspace..."
 if ! COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh up -d \
   yggdrasil-postgres \
@@ -191,7 +239,19 @@ for service in yggdrasil-postgres yggdrasil-rabbitmq; do
 done
 
 echo "Bringing isolated core and representative integrations up..."
-if ! COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh up -d \
+for service in \
+  yggdrasil-core \
+  yggdrasil-auth-surface \
+  yggdrasil-console \
+  "${RUNTIME_SMOKE_SERVICES[@]}"; do
+  if ! build_service_image "$service"; then
+    dump_compose_logs
+    echo "failed to build ${service} in the isolated workspace" >&2
+    exit 1
+  fi
+done
+
+if ! COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh up -d --no-build \
   yggdrasil-core \
   yggdrasil-auth-surface \
   yggdrasil-console \
@@ -239,5 +299,12 @@ for service in "${RUNTIME_SMOKE_SERVICES[@]}"; do
     exit 1
   fi
 done
+
+echo "Running isolated end-to-end product smoke..."
+if ! run_isolated_product_smoke 2; then
+  dump_compose_logs
+  echo "isolated end-to-end smoke failed" >&2
+  exit 1
+fi
 
 echo "Installation manager smoke passed."

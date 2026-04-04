@@ -620,9 +620,12 @@ func authSurfaceBaseURL(r *http.Request) string {
 	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); forwarded != "" {
 		scheme = forwarded
 	}
-	host := strings.TrimSpace(r.Host)
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
 	if host == "" {
-		host = "127.0.0.1:9090"
+		host = strings.TrimSpace(r.Host)
+	}
+	if host == "" {
+		host = "127.0.0.1"
 	}
 	return scheme + "://" + host
 }

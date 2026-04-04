@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"net/http/httptest"
 	"regexp"
 	"testing"
 	"time"
@@ -247,5 +248,35 @@ func TestMaterializeThirdPartyAuthProviderClientSecretHonorsExplicitSecretRef(t 
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestAuthSurfaceBaseURLPrefersExplicitSurfaceHeader(t *testing.T) {
+	t.Parallel()
+
+	request := httptest.NewRequest("GET", "http://yggdrasil-core:9080/api/v1/auth/third-party/start/github", nil)
+	request.Host = "yggdrasil-core:9080"
+	request.Header.Set("X-Yggdrasil-Surface-Base-URL", "http://127.0.0.1:19090/")
+	request.Header.Set("X-Forwarded-Host", "127.0.0.1:19090")
+
+	got := authSurfaceBaseURL(request)
+	want := "http://127.0.0.1:19090"
+	if got != want {
+		t.Fatalf("expected auth surface base URL %q, got %q", want, got)
+	}
+}
+
+func TestAuthSurfaceBaseURLUsesForwardedHostWhenSurfaceHeaderIsMissing(t *testing.T) {
+	t.Parallel()
+
+	request := httptest.NewRequest("GET", "http://yggdrasil-core:9080/api/v1/auth/third-party/start/github", nil)
+	request.Host = "yggdrasil-core:9080"
+	request.Header.Set("X-Forwarded-Proto", "http")
+	request.Header.Set("X-Forwarded-Host", "127.0.0.1:19090")
+
+	got := authSurfaceBaseURL(request)
+	want := "http://127.0.0.1:19090"
+	if got != want {
+		t.Fatalf("expected auth surface base URL %q, got %q", want, got)
 	}
 }

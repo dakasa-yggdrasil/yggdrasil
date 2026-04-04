@@ -24,7 +24,14 @@ services:
       - /bin/sh
       - -lc
       - |
+        mkdir -p /var/lib/rabbitmq
+        if [ -f /var/lib/rabbitmq/.erlang.cookie ] && [ ! -s /var/lib/rabbitmq/.erlang.cookie ]; then
+          rm -f /var/lib/rabbitmq/.erlang.cookie || true
+        fi
         chown -R rabbitmq:rabbitmq /var/lib/rabbitmq || true
+        if [ -f /var/lib/rabbitmq/.erlang.cookie ]; then
+          chmod 600 /var/lib/rabbitmq/.erlang.cookie || true
+        fi
         exec docker-entrypoint.sh rabbitmq-server
     ports:
       - "${RABBITMQ_HOST_PORT}:5672"

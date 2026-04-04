@@ -30,7 +30,8 @@ require_tool python3
 cookie_jar="$(mktemp)"
 mock_provider_pid=""
 mock_provider_script=""
-trap 'rm -f "${cookie_jar}" "${mock_provider_script}"; if [[ -n "${mock_provider_pid}" ]]; then kill "${mock_provider_pid}" >/dev/null 2>&1 || true; fi' EXIT
+oidc_start_headers="$(mktemp)"
+trap 'rm -f "${cookie_jar}" "${mock_provider_script}" "${oidc_start_headers}"; if [[ -n "${mock_provider_pid}" ]]; then kill "${mock_provider_pid}" >/dev/null 2>&1 || true; fi' EXIT
 
 wait_for_url() {
   local url="$1"
@@ -372,6 +373,36 @@ mock_provider_pid=$!
 sleep 1
 
 echo "Completing browser OIDC flow through auth surface..."
+curl -fsS \
+  -D "${oidc_start_headers}" \
+  -o /dev/null \
+  --get \
+  --data-urlencode "redirect_to=${auth_url}/api/v1/auth/session" \
+  "${auth_url}/api/v1/auth/third-party/start/${provider_name}"
+
+python3 - "${oidc_start_headers}" "${auth_url}" "${provider_name}" <<'PY'
+import sys
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+headers_path, auth_url, provider_name = sys.argv[1:4]
+location = ""
+for line in Path(headers_path).read_text(encoding="utf-8").splitlines():
+    if line.lower().startswith("location:"):
+        location = line.split(":", 1)[1].strip()
+        break
+
+if not location:
+    raise SystemExit("third-party start response did not include a Location header")
+
+redirect_uri = parse_qs(urlparse(location).query).get("redirect_uri", [""])[0]
+expected = f"{auth_url}/api/v1/auth/third-party/callback/{provider_name}"
+if redirect_uri != expected:
+    raise SystemExit(
+        f"unexpected OIDC callback redirect_uri: expected {expected!r}, got {redirect_uri!r}"
+    )
+PY
+
 oidc_session_response="$(curl -fsS -L \
   -c "${cookie_jar}" \
   -b "${cookie_jar}" \
