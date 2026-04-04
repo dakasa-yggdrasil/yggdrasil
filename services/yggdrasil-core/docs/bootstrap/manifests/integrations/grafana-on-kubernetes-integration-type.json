@@ -28,6 +28,17 @@
       "describe",
       "execute"
     ],
+    "guardian_support": {
+      "mode": "light",
+      "signals": {
+        "oom_killed": ["oom_killed", "oom"],
+        "restart_count": ["restart_count", "restarts"],
+        "error_rate": ["error_rate", "failure_rate"],
+        "memory_pressure": ["memory_pressure"],
+        "disk_pressure": ["disk_pressure"],
+        "sync_lag_seconds": ["sync_lag_seconds", "reconciliation_lag_seconds"]
+      }
+    },
     "credential_schema": {
       "mode": "none"
     },

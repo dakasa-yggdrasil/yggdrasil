@@ -108,6 +108,12 @@ func ValidateDocument(doc model.ManifestDocument) error {
 			return err
 		}
 		return ValidateGuardianPolicySpec(spec)
+	case "guardian_approval":
+		spec, err := ParseGuardianApprovalSpec(doc.Spec)
+		if err != nil {
+			return err
+		}
+		return ValidateGuardianApprovalSpec(spec)
 	case "remediation_contract":
 		spec, err := ParseRemediationContractSpec(doc.Spec)
 		if err != nil {

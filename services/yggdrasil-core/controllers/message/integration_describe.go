@@ -512,6 +512,7 @@ func compareIntegrationTypeSpec(expected model.IntegrationTypeManifestSpec, actu
 func normalizeIntegrationTypeSpecForComparison(spec model.IntegrationTypeManifestSpec) model.IntegrationTypeManifestSpec {
 	spec.Provider = normalizeIntegrationToken(spec.Provider)
 	spec.CredentialPolicy = model.IntegrationCredentialPolicySpec{}
+	spec.GuardianSupport = model.IntegrationGuardianSupportSpec{}
 	spec.Adapter = normalizeIntegrationAdapterSpec(spec.Adapter)
 	spec.Capabilities = normalizeIntegrationTokens(spec.Capabilities)
 	spec.CredentialSchema = normalizeIntegrationSchemaSpec(spec.CredentialSchema)

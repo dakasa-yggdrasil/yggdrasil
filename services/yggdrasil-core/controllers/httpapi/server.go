@@ -56,6 +56,12 @@ type catalogDiscoveryRegisterRequest struct {
 	Registration model.CatalogDiscoveryRegistration `json:"registration"`
 }
 
+type guardianApprovalDecisionRequest struct {
+	Status   string         `json:"status"`
+	Comment  string         `json:"comment,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
 type integrationCatalogResponse struct {
 	Domains []model.IntegrationCatalogDomain `json:"domains"`
 }
@@ -168,6 +174,9 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/repository-bindings", server.handleRepositoryBindingCreate)
 	mux.HandleFunc("GET /api/v1/guardian-policies", server.handleGuardianPolicyList)
 	mux.HandleFunc("POST /api/v1/guardian-policies", server.handleGuardianPolicyCreate)
+	mux.HandleFunc("GET /api/v1/guardian-approvals", server.handleGuardianApprovalList)
+	mux.HandleFunc("POST /api/v1/guardian-approvals", server.handleGuardianApprovalCreate)
+	mux.HandleFunc("POST /api/v1/guardian-approvals/{namespace}/{name}/decision", server.handleGuardianApprovalDecision)
 	mux.HandleFunc("GET /api/v1/remediation-contracts", server.handleRemediationContractList)
 	mux.HandleFunc("POST /api/v1/remediation-contracts", server.handleRemediationContractCreate)
 	mux.HandleFunc("GET /api/v1/surfaces", server.handleSurfaceList)
@@ -206,6 +215,9 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/console/repository-bindings", server.handleRepositoryBindingCreate)
 	mux.HandleFunc("GET /api/v1/console/guardian-policies", server.handleGuardianPolicyList)
 	mux.HandleFunc("POST /api/v1/console/guardian-policies", server.handleGuardianPolicyCreate)
+	mux.HandleFunc("GET /api/v1/console/guardian-approvals", server.handleGuardianApprovalList)
+	mux.HandleFunc("POST /api/v1/console/guardian-approvals", server.handleGuardianApprovalCreate)
+	mux.HandleFunc("POST /api/v1/console/guardian-approvals/{namespace}/{name}/decision", server.handleGuardianApprovalDecision)
 	mux.HandleFunc("GET /api/v1/console/remediation-contracts", server.handleRemediationContractList)
 	mux.HandleFunc("POST /api/v1/console/remediation-contracts", server.handleRemediationContractCreate)
 	mux.HandleFunc("GET /api/v1/console/surfaces", server.handleSurfaceList)
@@ -377,6 +389,10 @@ func (s *Server) handleIntegrationInstanceCreate(w http.ResponseWriter, r *http.
 	}
 
 	if err := s.materializeIntegrationInstanceCredentials(r.Context(), &payload, typeSpec); err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	if err := s.materializeIntegrationInstanceSecretConfig(r.Context(), &payload, typeSpec); err != nil {
 		writeMappedError(w, err)
 		return
 	}
@@ -650,6 +666,135 @@ func (s *Server) handleGuardianPolicyCreate(w http.ResponseWriter, r *http.Reque
 	s.handleManifestCreate(w, r, "guardian_policy")
 }
 
+func (s *Server) handleGuardianApprovalList(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestList(w, r, "guardian_approval")
+}
+
+func (s *Server) handleGuardianApprovalCreate(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestCreate(w, r, "guardian_approval")
+}
+
+func (s *Server) handleGuardianApprovalDecision(w http.ResponseWriter, r *http.Request) {
+	var req guardianApprovalDecisionRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	namespace := firstNonEmpty(queryString(r, "namespace"), r.PathValue("namespace"))
+	if strings.TrimSpace(namespace) == "" {
+		namespace = "global"
+	}
+	name := firstNonEmpty(queryString(r, "name"), r.PathValue("name"))
+	if strings.TrimSpace(name) == "" {
+		writeMappedError(w, fmt.Errorf("guardian approval name is required"))
+		return
+	}
+
+	manifestRecord, err := repository.ResolveManifest(r.Context(), s.db, "guardian_approval", namespace, name, nil, true)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	spec, err := manifestengine.ParseGuardianApprovalSpec(manifestRecord.Spec)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	spec = manifestengine.NormalizeGuardianApprovalSpec(spec)
+
+	status := strings.ToLower(strings.TrimSpace(req.Status))
+	switch status {
+	case model.GuardianApprovalStatusApproved, model.GuardianApprovalStatusRejected:
+	default:
+		writeMappedError(w, fmt.Errorf("guardian approval status %q is unsupported", req.Status))
+		return
+	}
+
+	spec.Status = status
+	if spec.Metadata == nil {
+		spec.Metadata = map[string]any{}
+	}
+	if strings.TrimSpace(req.Comment) != "" {
+		spec.Metadata["decision_comment"] = strings.TrimSpace(req.Comment)
+	}
+	for key, value := range req.Metadata {
+		spec.Metadata[key] = value
+	}
+	decidedAt := time.Now().UTC().Format(time.RFC3339)
+	spec.Metadata["decided_at"] = decidedAt
+
+	specRaw, err := json.Marshal(spec)
+	if err != nil {
+		writeMappedError(w, fmt.Errorf("marshal guardian approval spec: %w", err))
+		return
+	}
+
+	updatedManifest, err := createManifestVersion(r.Context(), s.db, model.ManifestDocument{
+		APIVersion: manifestRecord.APIVersion,
+		Kind:       manifestRecord.Kind,
+		Metadata: guardianApprovalMetadataInput(manifestRecord, spec.Status),
+		Spec: specRaw,
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	if status != model.GuardianApprovalStatusApproved {
+		writeJSON(w, http.StatusCreated, map[string]any{"manifest": updatedManifest})
+		return
+	}
+
+	if err := messagecontroller.ExecuteHeimdallApprovedAction(r.Context(), s.rabbitmq, s.db, spec); err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	spec.Status = model.GuardianApprovalStatusExecuted
+	spec.Metadata["executed_at"] = time.Now().UTC().Format(time.RFC3339)
+
+	executedSpecRaw, err := json.Marshal(spec)
+	if err != nil {
+		writeMappedError(w, fmt.Errorf("marshal guardian approval execution spec: %w", err))
+		return
+	}
+
+	executedManifest, err := createManifestVersion(r.Context(), s.db, model.ManifestDocument{
+		APIVersion: updatedManifest.APIVersion,
+		Kind:       updatedManifest.Kind,
+		Metadata:   guardianApprovalMetadataInput(updatedManifest, spec.Status),
+		Spec:       executedSpecRaw,
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"manifest":          executedManifest,
+		"approved_manifest": updatedManifest,
+	})
+}
+
+func guardianApprovalMetadataInput(manifestRecord model.Manifest, status string) model.ManifestMetadataInput {
+	labels := cloneStringMap(manifestRecord.Metadata.Labels)
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	if strings.TrimSpace(status) != "" {
+		labels["approval_status"] = strings.TrimSpace(status)
+	}
+
+	return model.ManifestMetadataInput{
+		Name:        manifestRecord.Metadata.Name,
+		Namespace:   manifestRecord.Metadata.Namespace,
+		Description: manifestRecord.Metadata.Description,
+		Labels:      labels,
+	}
+}
+
 func (s *Server) handleRemediationContractList(w http.ResponseWriter, r *http.Request) {
 	s.handleManifestList(w, r, "remediation_contract")
 }
@@ -674,6 +819,7 @@ func (s *Server) handleManifestList(w http.ResponseWriter, r *http.Request, kind
 	manifests, err := repository.ListManifests(r.Context(), s.db, model.ListManifestFilters{
 		Kind:       kind,
 		Namespace:  queryString(r, "namespace"),
+		Name:       queryString(r, "name"),
 		ActiveOnly: queryActiveOnly(r),
 	})
 	if err != nil {
@@ -1024,6 +1170,113 @@ func (s *Server) materializeIntegrationInstanceCredentials(
 	payload.Credentials = nil
 	payload.CredentialsRef = fmt.Sprintf("secret://%s/%s", secret.Namespace, secret.Name)
 	return nil
+}
+
+func (s *Server) materializeIntegrationInstanceSecretConfig(
+	ctx context.Context,
+	payload *consoleCreateIntegrationInstanceRequest,
+	typeSpec model.IntegrationTypeManifestSpec,
+) error {
+	if payload == nil || len(payload.Config) == 0 {
+		return nil
+	}
+
+	namespace := strings.TrimSpace(payload.Namespace)
+	if namespace == "" {
+		namespace = "global"
+	}
+	instanceName := strings.ToLower(strings.TrimSpace(payload.Name))
+	if instanceName == "" {
+		return fmt.Errorf("integration instance name is required to materialize secret config fields")
+	}
+
+	secretProperties := map[string]model.IntegrationSchemaProperty{}
+	for name, property := range typeSpec.InstanceSchema.Properties {
+		if property.Secret {
+			secretProperties[name] = property
+		}
+	}
+	if len(secretProperties) == 0 {
+		return nil
+	}
+
+	for key := range secretProperties {
+		value, exists := payload.Config[key]
+		if !exists || value == nil {
+			continue
+		}
+		if ref := strings.TrimSpace(anyString(value)); strings.HasPrefix(ref, "secret://") {
+			continue
+		}
+
+		secretValue, err := stringifySecretScalar(value)
+		if err != nil {
+			return fmt.Errorf("materialize secret config field %q: %w", key, err)
+		}
+
+		secretName := fmt.Sprintf("%s-config-%s", instanceName, normalizeSecretNameToken(key))
+		secret, err := repository.UpsertManagedSecret(ctx, s.db, model.UpsertManagedSecretRequest{
+			Namespace: namespace,
+			Name:      secretName,
+			Status:    "active",
+			Data: map[string]string{
+				"value": secretValue,
+			},
+			Metadata: map[string]any{
+				"source_kind": "integration_instance_config",
+				"integration_instance": map[string]any{
+					"namespace": namespace,
+					"name":      strings.TrimSpace(payload.Name),
+				},
+				"field": key,
+			},
+			Rotation: model.ManagedSecretRotationPolicy{Mode: "manual"},
+		})
+		if err != nil {
+			return err
+		}
+
+		payload.Config[key] = fmt.Sprintf("secret://%s/%s.value", secret.Namespace, secret.Name)
+	}
+
+	return nil
+}
+
+func stringifySecretScalar(value any) (string, error) {
+	switch typed := value.(type) {
+	case string:
+		return typed, nil
+	case bool, float64, float32, int, int32, int64, uint, uint32, uint64:
+		return fmt.Sprint(typed), nil
+	default:
+		return "", fmt.Errorf("secret config values must be scalar")
+	}
+}
+
+func normalizeSecretNameToken(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "_", "-")
+	value = strings.ReplaceAll(value, ".", "-")
+	return value
+}
+
+func anyString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *Server) resolveIntegrationTypeSpec(

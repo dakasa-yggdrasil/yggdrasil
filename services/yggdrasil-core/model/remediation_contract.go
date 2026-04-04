@@ -2,6 +2,7 @@ package model
 
 const (
 	RemediationContractActionModeWorkflowDispatch = "workflow_dispatch"
+	RemediationContractActionModeIntegrationExecute = "integration_execute"
 )
 
 // RemediationContractManifestSpec declares which bounded remediation paths one component exposes.
@@ -19,6 +20,7 @@ type RemediationContractActionSpec struct {
 	Mode             string                           `json:"mode"`
 	AutoExecute      bool                             `json:"auto_execute,omitempty"`
 	WorkflowDispatch *RemediationWorkflowDispatchSpec `json:"workflow_dispatch,omitempty"`
+	IntegrationExecute *RemediationIntegrationExecuteSpec `json:"integration_execute,omitempty"`
 }
 
 // RemediationWorkflowDispatchSpec dispatches a repository workflow as the remediation entrypoint.
@@ -27,4 +29,13 @@ type RemediationWorkflowDispatchSpec struct {
 	Workflow   string         `json:"workflow,omitempty"`
 	Ref        string         `json:"ref,omitempty"`
 	Inputs     map[string]any `json:"inputs,omitempty"`
+}
+
+// RemediationIntegrationExecuteSpec calls another integration directly as the
+// remediation entrypoint, enabling target-specific healing paths.
+type RemediationIntegrationExecuteSpec struct {
+	Integration ManifestSelector `json:"integration"`
+	Operation   string           `json:"operation"`
+	Capability  string           `json:"capability,omitempty"`
+	Input       map[string]any   `json:"input,omitempty"`
 }

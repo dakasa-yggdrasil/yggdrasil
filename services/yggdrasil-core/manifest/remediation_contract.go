@@ -11,6 +11,7 @@ import (
 
 var supportedRemediationActionModes = []string{
 	model.RemediationContractActionModeWorkflowDispatch,
+	model.RemediationContractActionModeIntegrationExecute,
 }
 
 // ParseRemediationContractSpec parses the raw spec payload into the typed manifest.
@@ -64,6 +65,19 @@ func ValidateRemediationContractSpec(spec model.RemediationContractManifestSpec)
 			if err := validateLooseObject("remediation_contract workflow_dispatch inputs", action.WorkflowDispatch.Inputs); err != nil {
 				return err
 			}
+		case model.RemediationContractActionModeIntegrationExecute:
+			if action.IntegrationExecute == nil {
+				return fmt.Errorf("remediation_contract action %q integration_execute is required", action.Name)
+			}
+			if !guardianPolicySelectorProvided(action.IntegrationExecute.Integration) {
+				return fmt.Errorf("remediation_contract action %q integration_execute integration is required", action.Name)
+			}
+			if strings.TrimSpace(action.IntegrationExecute.Operation) == "" {
+				return fmt.Errorf("remediation_contract action %q integration_execute operation is required", action.Name)
+			}
+			if err := validateLooseObject("remediation_contract integration_execute input", action.IntegrationExecute.Input); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -101,6 +115,19 @@ func NormalizeRemediationContractSpec(spec model.RemediationContractManifestSpec
 			}
 			if action.WorkflowDispatch.Inputs == nil {
 				action.WorkflowDispatch.Inputs = map[string]any{}
+			}
+		}
+		if action.IntegrationExecute != nil {
+			if strings.TrimSpace(action.IntegrationExecute.Integration.Namespace) == "" {
+				action.IntegrationExecute.Integration.Namespace = "global"
+			}
+			action.IntegrationExecute.Operation = strings.TrimSpace(action.IntegrationExecute.Operation)
+			action.IntegrationExecute.Capability = strings.TrimSpace(action.IntegrationExecute.Capability)
+			if action.IntegrationExecute.Capability == "" {
+				action.IntegrationExecute.Capability = action.IntegrationExecute.Operation
+			}
+			if action.IntegrationExecute.Input == nil {
+				action.IntegrationExecute.Input = map[string]any{}
 			}
 		}
 		actions = append(actions, action)

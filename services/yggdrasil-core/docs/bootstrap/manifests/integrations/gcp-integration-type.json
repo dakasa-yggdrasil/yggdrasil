@@ -28,6 +28,19 @@
       "describe",
       "execute"
     ],
+    "guardian_support": {
+      "mode": "light",
+      "signals": {
+        "error_rate": ["error_rate", "failure_rate"],
+        "rate_limited": ["rate_limited", "throttled", "quota_exceeded"],
+        "auth_denied": ["auth_denied", "unauthorized", "forbidden"],
+        "sync_lag_seconds": ["sync_lag_seconds", "reconciliation_lag_seconds"],
+        "monthly_cost_usd": ["monthly_cost_usd", "estimated_monthly_cost_usd", "cost_usd"],
+        "utilization": ["utilization", "avg_utilization"],
+        "idle_hours": ["idle_hours", "last_active_hours_ago"],
+        "overprovisioned": ["overprovisioned"]
+      }
+    },
     "credential_schema": {
       "mode": "inline",
       "properties": {

@@ -39,6 +39,12 @@ Current bootstrap instances:
 
 These manifests describe how the core can reach the adapters over RabbitMQ RPC. They do not deploy the adapter workers themselves.
 
+Lightweight Heimdall support now lives directly on `integration_type.spec.guardian_support`.
+If an integration declares that block, the core can map provider runtime details
+into canonical guardian signals without needing a provider-specific Heimdall path.
+If the integration omits it, Heimdall still sees the generic runtime state, but
+that provider does not get lightweight remediation support.
+
 Some integrations can also act as optional discovery sources. The first generic
 convention is `catalog_discover`, which lets the core ask an integration
 instance for candidate plugins or surfaces. This is intentionally provider

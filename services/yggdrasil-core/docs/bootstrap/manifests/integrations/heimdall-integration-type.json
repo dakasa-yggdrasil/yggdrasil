@@ -28,6 +28,16 @@
       "describe",
       "execute"
     ],
+    "guardian_support": {
+      "mode": "light",
+      "signals": {
+        "restart_count": ["restart_count", "restarts"],
+        "error_rate": ["error_rate", "failure_rate"],
+        "memory_pressure": ["memory_pressure"],
+        "monthly_cost_usd": ["monthly_cost_usd", "estimated_monthly_cost_usd"],
+        "utilization": ["utilization"]
+      }
+    },
     "credential_schema": {
       "mode": "none"
     },

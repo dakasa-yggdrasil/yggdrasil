@@ -10,6 +10,7 @@ import (
 )
 
 var supportedGuardianSeverityThresholds = []string{"low", "medium", "high", "critical"}
+var supportedGuardianAutonomyModes = []string{"policy_bound", "approval_required", "bypass_hotfix"}
 
 // ParseGuardianPolicySpec parses the raw spec payload into the typed manifest.
 func ParseGuardianPolicySpec(raw json.RawMessage) (model.GuardianPolicyManifestSpec, error) {
@@ -29,6 +30,12 @@ func ValidateGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) error {
 	spec = NormalizeGuardianPolicySpec(spec)
 	if !slices.Contains(supportedGuardianSeverityThresholds, spec.AutoHeal.SeverityThreshold) {
 		return fmt.Errorf("guardian_policy auto_heal severity_threshold %q is unsupported", spec.AutoHeal.SeverityThreshold)
+	}
+	if !slices.Contains(supportedGuardianAutonomyModes, spec.Autonomy.Mode) {
+		return fmt.Errorf("guardian_policy autonomy mode %q is unsupported", spec.Autonomy.Mode)
+	}
+	if !slices.Contains(supportedGuardianSeverityThresholds, spec.Autonomy.HotfixSeverityThreshold) {
+		return fmt.Errorf("guardian_policy autonomy hotfix_severity_threshold %q is unsupported", spec.Autonomy.HotfixSeverityThreshold)
 	}
 	if spec.AutoHeal.MaxActionsPerSweep < 0 {
 		return fmt.Errorf("guardian_policy auto_heal max_actions_per_sweep must be >= 0")
@@ -61,6 +68,15 @@ func NormalizeGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) model.Gu
 	}
 	if spec.AutoHeal.CooldownSeconds == 0 {
 		spec.AutoHeal.CooldownSeconds = 300
+	}
+
+	spec.Autonomy.Mode = strings.ToLower(strings.TrimSpace(spec.Autonomy.Mode))
+	if spec.Autonomy.Mode == "" {
+		spec.Autonomy.Mode = "policy_bound"
+	}
+	spec.Autonomy.HotfixSeverityThreshold = strings.ToLower(strings.TrimSpace(spec.Autonomy.HotfixSeverityThreshold))
+	if spec.Autonomy.HotfixSeverityThreshold == "" {
+		spec.Autonomy.HotfixSeverityThreshold = "critical"
 	}
 
 	if spec.CostOptimization.MinEstimatedMonthlySavingsUSD < 0 {

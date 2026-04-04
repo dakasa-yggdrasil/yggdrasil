@@ -27,6 +27,8 @@ The current service foundation includes:
 - workflow manifest parsing, rendering, and execution
 - generic integration execution through configured integration instances
 - closed-loop Heimdall guardian sweeps backed by repository bindings, guardian policies, and remediation contracts
+- integration-owned `guardian_support` contracts for plug-and-play lightweight Heimdall signals
+- optional Heimdall LLM fallback constrained by guardian autonomy policy
 - composed authorization evaluation across RBAC and policy
 - structured logging for worker execution
 - direct auth/session HTTP endpoints under `/api/v1/auth/...`
@@ -97,6 +99,7 @@ The first supported kinds are:
 - resource type and action catalog declarations
 - discovery, normalization, execution, and extension settings
 - active runtime `describe` handshake verification against the live plugin before integration execution
+- optional `guardian_support` describing canonical signals Heimdall can consume in lightweight mode
 - support for custom/open-source adapters without hardcoding providers in the core
 - a naming and responsibility convention:
   - substrate-specific installers should be explicit, such as `rabbitmq-on-kubernetes`
@@ -250,6 +253,15 @@ When RabbitMQ is enabled, the core also starts the periodic Heimdall guardian
 loop. The interval is controlled by:
 
 - `HEIMDALL_GUARDIAN_LOOP_INTERVAL_SECONDS`
+
+Heimdall autonomy is controlled by `guardian_policy.spec.autonomy`:
+
+- `policy_bound`: bounded actions execute directly inside policy limits
+- `approval_required`: actions are persisted as `guardian_approval` manifests and wait for human approval
+- `bypass_hotfix`: critical auto-remediation can bypass approval, while lower-risk actions still require approval
+
+When approval is granted through the HTTP API or console path, the core now
+executes the stored action and records the approval as `executed`.
 
 The intended split is:
 

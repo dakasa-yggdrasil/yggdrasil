@@ -22,6 +22,7 @@ var (
 	supportedIntegrationTransports     = []string{"rabbitmq", "http_json"}
 	supportedIntegrationSchemaModes    = []string{"none", "inline", "secret_ref"}
 	supportedCredentialPolicySources   = []string{"none", "inline", "secret_ref", "inline_or_secret_ref"}
+	supportedGuardianSupportModes      = []string{"none", "light", "full"}
 	supportedIntegrationSchemaTypes    = []string{"string", "number", "integer", "boolean", "object", "array"}
 	supportedIntegrationDiscoveryModes = []string{"pull", "push", "hybrid"}
 	supportedIntegrationCursorModes    = []string{"none", "full", "incremental"}
@@ -56,6 +57,9 @@ func ValidateIntegrationTypeSpec(spec model.IntegrationTypeManifestSpec) error {
 	if err := ValidateIntegrationCredentialPolicy(spec.CredentialPolicy, spec.CredentialSchema); err != nil {
 		return err
 	}
+	if err := validateIntegrationGuardianSupport(spec.GuardianSupport); err != nil {
+		return err
+	}
 	if err := validateIntegrationSchema("credential_schema", spec.CredentialSchema); err != nil {
 		return err
 	}
@@ -79,6 +83,36 @@ func ValidateIntegrationTypeSpec(spec model.IntegrationTypeManifestSpec) error {
 	}
 
 	return nil
+}
+
+func validateIntegrationGuardianSupport(spec model.IntegrationGuardianSupportSpec) error {
+	spec = NormalizeIntegrationGuardianSupport(spec)
+	if !slices.Contains(supportedGuardianSupportModes, spec.Mode) {
+		return fmt.Errorf("integration_type guardian_support mode %q is unsupported", spec.Mode)
+	}
+
+	for label, values := range integrationGuardianSignalGroups(spec.Signals) {
+		if err := validateGuardianSignalKeys(label, values); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// NormalizeIntegrationGuardianSupport applies compatibility defaults to
+// guardian support blocks that are owned by the core rather than the adapter.
+func NormalizeIntegrationGuardianSupport(spec model.IntegrationGuardianSupportSpec) model.IntegrationGuardianSupportSpec {
+	spec.Mode = strings.ToLower(strings.TrimSpace(spec.Mode))
+	if spec.Mode == "" {
+		if len(integrationGuardianSignalGroups(spec.Signals)) == 0 {
+			spec.Mode = "none"
+		} else {
+			spec.Mode = "light"
+		}
+	}
+	spec.Signals = normalizeIntegrationGuardianSignals(spec.Signals)
+	return spec
 }
 
 // NormalizeIntegrationCredentialPolicy applies compatibility defaults to an integration credential policy.
@@ -120,6 +154,81 @@ func ValidateIntegrationCredentialPolicy(policy model.IntegrationCredentialPolic
 	}
 
 	return nil
+}
+
+func normalizeIntegrationGuardianSignals(signals model.IntegrationGuardianSignalSupportSpec) model.IntegrationGuardianSignalSupportSpec {
+	signals.OOMKilled = normalizeGuardianSignalKeys(signals.OOMKilled)
+	signals.RestartCount = normalizeGuardianSignalKeys(signals.RestartCount)
+	signals.ErrorRate = normalizeGuardianSignalKeys(signals.ErrorRate)
+	signals.QueueBacklog = normalizeGuardianSignalKeys(signals.QueueBacklog)
+	signals.MemoryPressure = normalizeGuardianSignalKeys(signals.MemoryPressure)
+	signals.DiskPressure = normalizeGuardianSignalKeys(signals.DiskPressure)
+	signals.RateLimited = normalizeGuardianSignalKeys(signals.RateLimited)
+	signals.AuthDenied = normalizeGuardianSignalKeys(signals.AuthDenied)
+	signals.SyncLagSeconds = normalizeGuardianSignalKeys(signals.SyncLagSeconds)
+	signals.MonthlyCostUSD = normalizeGuardianSignalKeys(signals.MonthlyCostUSD)
+	signals.Utilization = normalizeGuardianSignalKeys(signals.Utilization)
+	signals.IdleHours = normalizeGuardianSignalKeys(signals.IdleHours)
+	signals.Overprovisioned = normalizeGuardianSignalKeys(signals.Overprovisioned)
+	return signals
+}
+
+func normalizeGuardianSignalKeys(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		key := normalizeIntegrationName(value)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, key)
+	}
+	return normalized
+}
+
+func validateGuardianSignalKeys(label string, values []string) error {
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = normalizeIntegrationName(value)
+		if value == "" {
+			return fmt.Errorf("integration_type guardian_support %s cannot contain empty values", label)
+		}
+		if _, exists := seen[value]; exists {
+			return fmt.Errorf("integration_type guardian_support %s key %q is duplicated", label, value)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
+func integrationGuardianSignalGroups(signals model.IntegrationGuardianSignalSupportSpec) map[string][]string {
+	groups := map[string][]string{}
+	add := func(label string, values []string) {
+		if len(values) > 0 {
+			groups[label] = values
+		}
+	}
+	add("oom_killed", signals.OOMKilled)
+	add("restart_count", signals.RestartCount)
+	add("error_rate", signals.ErrorRate)
+	add("queue_backlog", signals.QueueBacklog)
+	add("memory_pressure", signals.MemoryPressure)
+	add("disk_pressure", signals.DiskPressure)
+	add("rate_limited", signals.RateLimited)
+	add("auth_denied", signals.AuthDenied)
+	add("sync_lag_seconds", signals.SyncLagSeconds)
+	add("monthly_cost_usd", signals.MonthlyCostUSD)
+	add("utilization", signals.Utilization)
+	add("idle_hours", signals.IdleHours)
+	add("overprovisioned", signals.Overprovisioned)
+	return groups
 }
 
 func validateIntegrationAdapter(adapter model.IntegrationAdapterSpec, capabilities []string) error {

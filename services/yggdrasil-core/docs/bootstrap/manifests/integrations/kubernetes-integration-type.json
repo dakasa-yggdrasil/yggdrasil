@@ -28,6 +28,18 @@
       "describe",
       "execute"
     ],
+    "guardian_support": {
+      "mode": "light",
+      "signals": {
+        "oom_killed": ["oom_killed", "oom"],
+        "restart_count": ["restart_count", "restarts"],
+        "error_rate": ["error_rate", "failure_rate"],
+        "memory_pressure": ["memory_pressure"],
+        "disk_pressure": ["disk_pressure"],
+        "utilization": ["utilization", "avg_utilization"],
+        "overprovisioned": ["overprovisioned"]
+      }
+    },
     "credential_schema": {
       "mode": "inline",
       "properties": {

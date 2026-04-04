@@ -28,6 +28,17 @@
       "describe",
       "execute"
     ],
+    "guardian_support": {
+      "mode": "light",
+      "signals": {
+        "restart_count": ["restart_count", "restarts"],
+        "error_rate": ["error_rate", "failure_rate"],
+        "queue_backlog": ["queue_backlog", "messages_ready", "backlog"],
+        "memory_pressure": ["memory_pressure"],
+        "disk_pressure": ["disk_pressure"],
+        "auth_denied": ["auth_denied", "unauthorized", "forbidden"]
+      }
+    },
     "credential_schema": {
       "mode": "inline",
       "required": [

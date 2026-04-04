@@ -16,6 +16,11 @@
       "name": "heimdall-guardian"
     },
     "scope": "global",
+    "autonomy": {
+      "mode": "policy_bound",
+      "allow_llm_fallback": false,
+      "hotfix_severity_threshold": "critical"
+    },
     "auto_heal": {
       "enabled": true,
       "severity_threshold": "critical",

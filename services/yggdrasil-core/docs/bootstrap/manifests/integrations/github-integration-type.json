@@ -28,6 +28,15 @@
       "describe",
       "execute"
     ],
+    "guardian_support": {
+      "mode": "light",
+      "signals": {
+        "error_rate": ["error_rate", "failure_rate"],
+        "rate_limited": ["rate_limited", "throttled", "secondary_rate_limited"],
+        "auth_denied": ["auth_denied", "unauthorized", "forbidden"],
+        "sync_lag_seconds": ["sync_lag_seconds", "reconciliation_lag_seconds"]
+      }
+    },
     "credential_schema": {
       "mode": "inline",
       "properties": {

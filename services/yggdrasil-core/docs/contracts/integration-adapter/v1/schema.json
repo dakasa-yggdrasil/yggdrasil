@@ -96,6 +96,33 @@
       },
       "additionalProperties": false
     },
+    "integrationGuardianSignalSupportSpec": {
+      "type": "object",
+      "properties": {
+        "oom_killed": { "type": "array", "items": { "type": "string" } },
+        "restart_count": { "type": "array", "items": { "type": "string" } },
+        "error_rate": { "type": "array", "items": { "type": "string" } },
+        "queue_backlog": { "type": "array", "items": { "type": "string" } },
+        "memory_pressure": { "type": "array", "items": { "type": "string" } },
+        "disk_pressure": { "type": "array", "items": { "type": "string" } },
+        "rate_limited": { "type": "array", "items": { "type": "string" } },
+        "auth_denied": { "type": "array", "items": { "type": "string" } },
+        "sync_lag_seconds": { "type": "array", "items": { "type": "string" } },
+        "monthly_cost_usd": { "type": "array", "items": { "type": "string" } },
+        "utilization": { "type": "array", "items": { "type": "string" } },
+        "idle_hours": { "type": "array", "items": { "type": "string" } },
+        "overprovisioned": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "integrationGuardianSupportSpec": {
+      "type": "object",
+      "properties": {
+        "mode": { "type": "string" },
+        "signals": { "$ref": "#/$defs/integrationGuardianSignalSupportSpec" }
+      },
+      "additionalProperties": false
+    },
     "integrationResourceType": {
       "type": "object",
       "required": ["name", "canonical_prefix", "identity_template", "discoverable", "default_actions"],
@@ -176,6 +203,7 @@
         "adapter": { "$ref": "#/$defs/integrationAdapterSpec" },
         "capabilities": { "type": "array", "items": { "type": "string" } },
         "credential_policy": { "$ref": "#/$defs/integrationCredentialPolicySpec" },
+        "guardian_support": { "$ref": "#/$defs/integrationGuardianSupportSpec" },
         "credential_schema": { "$ref": "#/$defs/integrationSchemaSpec" },
         "instance_schema": { "$ref": "#/$defs/integrationSchemaSpec" },
         "resource_types": { "type": "array", "items": { "$ref": "#/$defs/integrationResourceType" } },

@@ -5,6 +5,7 @@ type GuardianPolicyManifestSpec struct {
 	GuardianRef          ManifestSelector                       `json:"guardian_ref"`
 	Scope                string                                 `json:"scope,omitempty"`
 	AutoHeal             GuardianAutoHealPolicySpec             `json:"auto_heal,omitempty"`
+	Autonomy            GuardianAutonomyPolicySpec             `json:"autonomy,omitempty"`
 	RepositoryAutomation GuardianRepositoryAutomationPolicySpec `json:"repository_automation,omitempty"`
 	CostOptimization     GuardianCostOptimizationPolicySpec     `json:"cost_optimization,omitempty"`
 }
@@ -31,4 +32,12 @@ type GuardianCostOptimizationPolicySpec struct {
 	Enabled                       bool    `json:"enabled,omitempty"`
 	MinEstimatedMonthlySavingsUSD float64 `json:"min_estimated_monthly_savings_usd,omitempty"`
 	AllowRightsize                bool    `json:"allow_rightsize,omitempty"`
+}
+
+// GuardianAutonomyPolicySpec controls when Heimdall may act directly, when it
+// must request approval, and when it may engage the LLM fallback path.
+type GuardianAutonomyPolicySpec struct {
+	Mode                    string `json:"mode,omitempty"`
+	AllowLLMFallback        bool   `json:"allow_llm_fallback,omitempty"`
+	HotfixSeverityThreshold string `json:"hotfix_severity_threshold,omitempty"`
 }
