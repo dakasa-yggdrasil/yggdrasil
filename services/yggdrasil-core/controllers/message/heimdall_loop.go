@@ -1810,17 +1810,33 @@ func heimdallActionLearningMetadata(
 	default:
 		providerKey = fmt.Sprintf("component_kind:%s", strings.ToLower(strings.TrimSpace(componentKind)))
 	}
+	providerGroup := heimdallActionProviderGroup(typeName, runtimeKind, repository, componentKind)
 
 	return map[string]any{
 		"component_key":     heimdallComponentKey(componentKind, componentNamespace, componentName),
 		"action_type":       actionType,
 		"repository":        repository,
 		"provider_key":      providerKey,
+		"provider_group":    providerGroup,
 		"incident_category": firstNonEmpty(anyString(incident["category"]), "incident"),
 		"incident_severity": firstNonEmpty(anyString(incident["severity"]), "unknown"),
 		"type_name":         typeName,
 		"type_namespace":    typeNamespace,
 		"runtime_kind":      runtimeKind,
+	}
+}
+
+func heimdallActionProviderGroup(typeName, runtimeKind, repository, componentKind string) string {
+	switch {
+	case strings.TrimSpace(typeName) != "":
+		return strings.ToLower(strings.TrimSpace(typeName))
+	case strings.TrimSpace(runtimeKind) != "":
+		return strings.ToLower(strings.TrimSpace(runtimeKind))
+	case strings.TrimSpace(repository) != "":
+		parts := strings.Split(strings.TrimSpace(repository), "/")
+		return strings.ToLower(strings.TrimSpace(parts[len(parts)-1]))
+	default:
+		return strings.ToLower(strings.TrimSpace(componentKind))
 	}
 }
 
