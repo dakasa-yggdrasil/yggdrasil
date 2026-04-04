@@ -114,6 +114,12 @@ func ValidateDocument(doc model.ManifestDocument) error {
 			return err
 		}
 		return ValidateGuardianApprovalSpec(spec)
+	case "guardian_memory":
+		spec, err := ParseGuardianMemorySpec(doc.Spec)
+		if err != nil {
+			return err
+		}
+		return ValidateGuardianMemorySpec(spec)
 	case "remediation_contract":
 		spec, err := ParseRemediationContractSpec(doc.Spec)
 		if err != nil {

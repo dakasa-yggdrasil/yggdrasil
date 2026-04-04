@@ -1,6 +1,6 @@
 # yggdrasil-core
 
-`yggdrasil-core` is the central control plane for Yggdrasil. It owns the core database, serves the synchronous HTTP API used by reference surfaces, stores manifests, and evaluates the rules that drive internal and third-party authorization. The first supported manifest kinds are `rbac`, `policy`, `integration_type`, `integration_instance`, `resource`, `surface`, `repository_binding`, `guardian_policy`, `remediation_contract`, `product`, and `workflow`.
+`yggdrasil-core` is the central control plane for Yggdrasil. It owns the core database, serves the synchronous HTTP API used by reference surfaces, stores manifests, and evaluates the rules that drive internal and third-party authorization. The first supported manifest kinds are `rbac`, `policy`, `integration_type`, `integration_instance`, `resource`, `surface`, `repository_binding`, `guardian_policy`, `guardian_approval`, `guardian_memory`, `remediation_contract`, `product`, and `workflow`.
 
 The current service foundation includes:
 
@@ -22,6 +22,8 @@ The current service foundation includes:
 - surface manifest parsing and validation
 - repository_binding manifest parsing and validation
 - guardian_policy manifest parsing and validation
+- guardian_approval manifest parsing and validation
+- guardian_memory manifest parsing and validation
 - remediation_contract manifest parsing and validation
 - product manifest parsing and validation
 - workflow manifest parsing, rendering, and execution
@@ -71,6 +73,8 @@ The first supported kinds are:
 - `surface`
 - `repository_binding`
 - `guardian_policy`
+- `guardian_approval`
+- `guardian_memory`
 - `remediation_contract`
 - `product`
 - `workflow`
@@ -114,6 +118,13 @@ The first supported kinds are:
 - owners and lifecycle status
 - discovery scheduling/enablement
 - runtime execution overrides such as batch size and default dry-run
+
+`guardian_memory` has:
+
+- one persisted record per Heimdall action attempt
+- execution details such as `attempted_at`, `completed_at`, and `error`
+- later observed outcome after the sweep loop inspects the component again
+- a reusable operational memory surface so the guardian can avoid repeating the same failed action blindly
 
 `resource` has:
 
@@ -262,6 +273,10 @@ Heimdall autonomy is controlled by `guardian_policy.spec.autonomy`:
 
 When approval is granted through the HTTP API or console path, the core now
 executes the stored action and records the approval as `executed`.
+
+The core also stores `guardian_memory` entries for Heimdall actions. Those
+entries let later sweeps compare "what we tried" with "what the ecosystem looked
+like afterward", which is the basis for learned remediation behavior.
 
 The intended split is:
 

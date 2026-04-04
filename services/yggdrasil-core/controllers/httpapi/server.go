@@ -177,6 +177,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("GET /api/v1/guardian-approvals", server.handleGuardianApprovalList)
 	mux.HandleFunc("POST /api/v1/guardian-approvals", server.handleGuardianApprovalCreate)
 	mux.HandleFunc("POST /api/v1/guardian-approvals/{namespace}/{name}/decision", server.handleGuardianApprovalDecision)
+	mux.HandleFunc("GET /api/v1/guardian-memories", server.handleGuardianMemoryList)
 	mux.HandleFunc("GET /api/v1/remediation-contracts", server.handleRemediationContractList)
 	mux.HandleFunc("POST /api/v1/remediation-contracts", server.handleRemediationContractCreate)
 	mux.HandleFunc("GET /api/v1/surfaces", server.handleSurfaceList)
@@ -218,6 +219,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("GET /api/v1/console/guardian-approvals", server.handleGuardianApprovalList)
 	mux.HandleFunc("POST /api/v1/console/guardian-approvals", server.handleGuardianApprovalCreate)
 	mux.HandleFunc("POST /api/v1/console/guardian-approvals/{namespace}/{name}/decision", server.handleGuardianApprovalDecision)
+	mux.HandleFunc("GET /api/v1/console/guardian-memories", server.handleGuardianMemoryList)
 	mux.HandleFunc("GET /api/v1/console/remediation-contracts", server.handleRemediationContractList)
 	mux.HandleFunc("POST /api/v1/console/remediation-contracts", server.handleRemediationContractCreate)
 	mux.HandleFunc("GET /api/v1/console/surfaces", server.handleSurfaceList)
@@ -674,6 +676,10 @@ func (s *Server) handleGuardianApprovalCreate(w http.ResponseWriter, r *http.Req
 	s.handleManifestCreate(w, r, "guardian_approval")
 }
 
+func (s *Server) handleGuardianMemoryList(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestList(w, r, "guardian_memory")
+}
+
 func (s *Server) handleGuardianApprovalDecision(w http.ResponseWriter, r *http.Request) {
 	var req guardianApprovalDecisionRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -743,6 +749,10 @@ func (s *Server) handleGuardianApprovalDecision(w http.ResponseWriter, r *http.R
 	}
 
 	if status != model.GuardianApprovalStatusApproved {
+		if err := messagecontroller.UpdateHeimdallApprovalMemoryStatus(r.Context(), s.db, spec, status, req.Comment); err != nil {
+			writeMappedError(w, err)
+			return
+		}
 		writeJSON(w, http.StatusCreated, map[string]any{"manifest": updatedManifest})
 		return
 	}

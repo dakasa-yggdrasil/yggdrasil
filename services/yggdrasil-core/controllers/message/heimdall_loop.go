@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 	manifestengine "github.com/dakasa-co/yggdrasil-core/manifest"
 	"github.com/dakasa-co/yggdrasil-core/model"
 	"github.com/dakasa-co/yggdrasil-core/repository"
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
 )
@@ -41,9 +43,16 @@ type heimdallRemediationContract struct {
 	Spec     model.RemediationContractManifestSpec
 }
 
+type heimdallGuardianMemory struct {
+	Manifest model.Manifest
+	Spec     model.GuardianMemoryManifestSpec
+}
+
 type heimdallExecutionOptions struct {
 	SkipApproval bool
 	SkipCooldown bool
+	MemoryName   string
+	MemoryNS     string
 }
 
 // StartHeimdallGuardianLoop runs the periodic closed-loop guardian sweep.
@@ -388,6 +397,38 @@ func loadHeimdallRemediationContracts(ctx context.Context, db *sql.DB) (map[stri
 	return contracts, nil
 }
 
+func loadHeimdallGuardianMemories(ctx context.Context, db *sql.DB) ([]heimdallGuardianMemory, error) {
+	manifests, err := repository.ListManifests(ctx, db, model.ListManifestFilters{
+		Kind:       "guardian_memory",
+		ActiveOnly: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	memories := make([]heimdallGuardianMemory, 0, len(manifests))
+	for _, manifestRecord := range manifests {
+		spec, err := manifestengine.ParseGuardianMemorySpec(manifestRecord.Spec)
+		if err != nil {
+			return nil, err
+		}
+		spec = manifestengine.NormalizeGuardianMemorySpec(spec)
+		memories = append(memories, heimdallGuardianMemory{
+			Manifest: manifestRecord,
+			Spec:     spec,
+		})
+	}
+
+	sort.SliceStable(memories, func(i, j int) bool {
+		if !memories[i].Manifest.CreatedAt.Equal(memories[j].Manifest.CreatedAt) {
+			return memories[i].Manifest.CreatedAt.After(memories[j].Manifest.CreatedAt)
+		}
+		return memories[i].Manifest.Metadata.Name < memories[j].Manifest.Metadata.Name
+	})
+
+	return memories, nil
+}
+
 func loadHeimdallIntegrationTypeSpecs(ctx context.Context, db *sql.DB) (map[string]model.IntegrationTypeManifestSpec, error) {
 	manifests, err := repository.ListManifests(ctx, db, model.ListManifestFilters{
 		Kind:       "integration_type",
@@ -571,7 +612,7 @@ func buildHeimdallEcosystemSnapshot(
 		})
 	}
 
-	return map[string]any{
+	snapshot := map[string]any{
 		"integrations": integrations,
 		"surfaces":     surfaces,
 		"secrets":      secrets,
@@ -583,7 +624,24 @@ func buildHeimdallEcosystemSnapshot(
 			"repository_bindings":    len(repositoryBindings),
 			"default_guardian_scope": "global",
 		},
-	}, nil
+	}
+
+	memories, err := loadHeimdallGuardianMemories(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	if err := observeHeimdallGuardianMemories(ctx, db, snapshot, memories); err != nil {
+		return nil, err
+	}
+	memories, err = loadHeimdallGuardianMemories(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	snapshot["memories"] = heimdallGuardianMemoryItems(memories)
+	metadata := snapshot["metadata"].(map[string]any)
+	metadata["guardian_memories"] = len(memories)
+
+	return snapshot, nil
 }
 
 func heimdallRepositoryBindingMetadata(binding heimdallRepositoryBinding) map[string]any {
@@ -857,13 +915,18 @@ func executeHeimdallActionWithOptions(
 		return createHeimdallApprovalRequest(ctx, db, action, policy, source)
 	}
 
+	memory, err := ensureHeimdallExecutionMemory(ctx, db, action, policy, source, options)
+	if err != nil {
+		return err
+	}
+
 	actionType := strings.ToLower(strings.TrimSpace(anyString(action["type"])))
 	switch actionType {
 	case "dispatch_workflow":
 		if !policy.AutoHeal.AllowDispatchWorkflow {
 			return fmt.Errorf("heimdall guardian policy blocks dispatch_workflow actions")
 		}
-		return executeHeimdallWorkflowDispatch(ctx, conn, db, action, repositoryBindings, policy, source, options)
+		err = executeHeimdallWorkflowDispatch(ctx, conn, db, action, repositoryBindings, policy, source, options)
 	case "rightsize_component":
 		allowRightsize := policy.AutoHeal.AllowRightsize
 		if source == "cost_optimization" {
@@ -872,15 +935,20 @@ func executeHeimdallActionWithOptions(
 		if !allowRightsize {
 			return fmt.Errorf("heimdall guardian policy blocks rightsize_component actions")
 		}
-		return executeHeimdallContractAction(ctx, conn, db, action, repositoryBindings, remediationContracts, policy, source, options)
+		err = executeHeimdallContractAction(ctx, conn, db, action, repositoryBindings, remediationContracts, policy, source, options)
 	case "rotate_secret":
 		if !policy.AutoHeal.AllowRotateSecret {
 			return fmt.Errorf("heimdall guardian policy blocks rotate_secret actions")
 		}
-		return executeHeimdallSecretRotation(ctx, db, action)
+		err = executeHeimdallSecretRotation(ctx, db, action)
 	default:
-		return fmt.Errorf("heimdall action type %q is not executable by the core loop", actionType)
+		err = fmt.Errorf("heimdall action type %q is not executable by the core loop", actionType)
 	}
+
+	if memoryErr := finalizeHeimdallExecutionMemory(ctx, db, memory, action, err); memoryErr != nil && err == nil {
+		return memoryErr
+	}
+	return err
 }
 
 // ExecuteHeimdallApprovedAction executes a previously approved guardian action
@@ -932,6 +1000,8 @@ func ExecuteHeimdallApprovedAction(
 		heimdallExecutionOptions{
 			SkipApproval: true,
 			SkipCooldown: true,
+			MemoryName:   anyString(approval.Metadata["memory_name"]),
+			MemoryNS:     anyString(approval.Metadata["memory_namespace"]),
 		},
 	)
 }
@@ -984,6 +1054,13 @@ func createHeimdallApprovalRequest(
 			"requested_at":  time.Now().UTC().Format(time.RFC3339),
 		},
 	})
+
+	memory, err := createHeimdallPendingApprovalMemory(ctx, db, action, policy, source)
+	if err != nil {
+		return err
+	}
+	spec.Metadata["memory_name"] = memory.Manifest.Metadata.Name
+	spec.Metadata["memory_namespace"] = memory.Manifest.Metadata.Namespace
 
 	specRaw, err := json.Marshal(spec)
 	if err != nil {
@@ -1662,6 +1739,18 @@ func normalizeHeimdallApprovalName(componentKind, componentName, actionType stri
 	return strings.Trim(strings.Join(values, "-"), "-")
 }
 
+func normalizeHeimdallMemoryName(componentKind, componentName, actionType string, now time.Time) string {
+	values := []string{
+		"heimdall",
+		"memory",
+		normalizeIntegrationToken(componentKind),
+		normalizeIntegrationToken(componentName),
+		normalizeIntegrationToken(actionType),
+		fmt.Sprintf("%d", now.UTC().UnixNano()),
+	}
+	return strings.Trim(strings.Join(values, "-"), "-")
+}
+
 func heimdallIncidentFromAction(action map[string]any) map[string]any {
 	incident, ok := action["incident"].(map[string]any)
 	if ok {
@@ -1677,6 +1766,391 @@ func heimdallIncidentFromAction(action map[string]any) map[string]any {
 		"component_name":      firstNonEmpty(anyString(action["component_name"]), anyString(action["name"]), "unknown"),
 		"repository":          firstNonEmpty(anyString(action["repository"]), anyString(action["repo"])),
 	}
+}
+
+func heimdallActionEvidence(action map[string]any) map[string]any {
+	if evidence, ok := action["evidence"].(map[string]any); ok {
+		return cloneAuthorizationInput(evidence)
+	}
+	incident := heimdallIncidentFromAction(action)
+	if evidence, ok := incident["evidence"].(map[string]any); ok {
+		return cloneAuthorizationInput(evidence)
+	}
+	return map[string]any{}
+}
+
+func createHeimdallPendingApprovalMemory(
+	ctx context.Context,
+	db *sql.DB,
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+) (heimdallGuardianMemory, error) {
+	now := time.Now().UTC()
+	actionType := firstNonEmpty(anyString(action["type"]), "action")
+	componentKind := firstNonEmpty(anyString(action["component_kind"]), anyString(action["kind"]), "component")
+	componentNamespace := firstNonEmpty(anyString(action["component_namespace"]), anyString(action["namespace"]), "global")
+	componentName := firstNonEmpty(anyString(action["component_name"]), anyString(action["name"]), "unknown")
+
+	spec := manifestengine.NormalizeGuardianMemorySpec(model.GuardianMemoryManifestSpec{
+		GuardianRef:        policy.GuardianRef,
+		Status:             model.GuardianMemoryStatusPendingApproval,
+		Source:             source,
+		ComponentKind:      componentKind,
+		ComponentNamespace: componentNamespace,
+		ComponentName:      componentName,
+		Action:             cloneAuthorizationInput(action),
+		Incident:           heimdallIncidentFromAction(action),
+		Evidence:           heimdallActionEvidence(action),
+		Metadata: map[string]any{
+			"autonomy_mode": policy.Autonomy.Mode,
+			"requested_at":  now.Format(time.RFC3339),
+		},
+	})
+
+	return createHeimdallGuardianMemory(ctx, db, normalizeHeimdallMemoryName(componentKind, componentName, actionType, now), spec)
+}
+
+func ensureHeimdallExecutionMemory(
+	ctx context.Context,
+	db *sql.DB,
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+	options heimdallExecutionOptions,
+) (heimdallGuardianMemory, error) {
+	now := time.Now().UTC()
+	if strings.TrimSpace(options.MemoryName) != "" {
+		memoryNS := firstNonEmpty(options.MemoryNS, "global")
+		manifestRecord, err := repository.ResolveManifest(ctx, db, "guardian_memory", memoryNS, options.MemoryName, nil, true)
+		if err != nil {
+			return heimdallGuardianMemory{}, err
+		}
+		spec, err := manifestengine.ParseGuardianMemorySpec(manifestRecord.Spec)
+		if err != nil {
+			return heimdallGuardianMemory{}, err
+		}
+		spec = manifestengine.NormalizeGuardianMemorySpec(spec)
+		spec.Status = model.GuardianMemoryStatusExecuting
+		spec.Execution.AttemptedAt = now.Format(time.RFC3339)
+		spec.Execution.CompletedAt = ""
+		spec.Execution.Error = ""
+		spec.Metadata["approval_executed"] = true
+		return updateHeimdallGuardianMemory(ctx, db, heimdallGuardianMemory{
+			Manifest: manifestRecord,
+			Spec:     spec,
+		})
+	}
+
+	actionType := firstNonEmpty(anyString(action["type"]), "action")
+	componentKind := firstNonEmpty(anyString(action["component_kind"]), anyString(action["kind"]), "component")
+	componentNamespace := firstNonEmpty(anyString(action["component_namespace"]), anyString(action["namespace"]), "global")
+	componentName := firstNonEmpty(anyString(action["component_name"]), anyString(action["name"]), "unknown")
+
+	spec := manifestengine.NormalizeGuardianMemorySpec(model.GuardianMemoryManifestSpec{
+		GuardianRef:        policy.GuardianRef,
+		Status:             model.GuardianMemoryStatusExecuting,
+		Source:             source,
+		ComponentKind:      componentKind,
+		ComponentNamespace: componentNamespace,
+		ComponentName:      componentName,
+		Action:             cloneAuthorizationInput(action),
+		Incident:           heimdallIncidentFromAction(action),
+		Evidence:           heimdallActionEvidence(action),
+		Execution: model.GuardianMemoryExecutionSpec{
+			AttemptedAt: now.Format(time.RFC3339),
+		},
+		Metadata: map[string]any{
+			"autonomy_mode": policy.Autonomy.Mode,
+		},
+	})
+
+	return createHeimdallGuardianMemory(ctx, db, normalizeHeimdallMemoryName(componentKind, componentName, actionType, now), spec)
+}
+
+func finalizeHeimdallExecutionMemory(
+	ctx context.Context,
+	db *sql.DB,
+	memory heimdallGuardianMemory,
+	action map[string]any,
+	executionErr error,
+) error {
+	if memory.Manifest.ID == uuid.Nil {
+		return nil
+	}
+
+	spec := memory.Spec
+	spec.Action = cloneAuthorizationInput(action)
+	spec.Incident = heimdallIncidentFromAction(action)
+	spec.Evidence = heimdallActionEvidence(action)
+	spec.Execution.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+	if executionErr != nil {
+		spec.Status = model.GuardianMemoryStatusExecutionFailed
+		spec.Execution.Error = strings.TrimSpace(executionErr.Error())
+	} else {
+		spec.Status = model.GuardianMemoryStatusExecuted
+		spec.Execution.Error = ""
+	}
+
+	_, err := updateHeimdallGuardianMemory(ctx, db, heimdallGuardianMemory{
+		Manifest: memory.Manifest,
+		Spec:     spec,
+	})
+	return err
+}
+
+func UpdateHeimdallApprovalMemoryStatus(
+	ctx context.Context,
+	db *sql.DB,
+	approval model.GuardianApprovalManifestSpec,
+	status string,
+	comment string,
+) error {
+	memoryName := strings.TrimSpace(anyString(approval.Metadata["memory_name"]))
+	if memoryName == "" {
+		return nil
+	}
+	memoryNS := firstNonEmpty(anyString(approval.Metadata["memory_namespace"]), "global")
+	manifestRecord, err := repository.ResolveManifest(ctx, db, "guardian_memory", memoryNS, memoryName, nil, true)
+	if err != nil {
+		return err
+	}
+	spec, err := manifestengine.ParseGuardianMemorySpec(manifestRecord.Spec)
+	if err != nil {
+		return err
+	}
+	spec = manifestengine.NormalizeGuardianMemorySpec(spec)
+	spec.Status = strings.TrimSpace(status)
+	if spec.Metadata == nil {
+		spec.Metadata = map[string]any{}
+	}
+	if strings.TrimSpace(comment) != "" {
+		spec.Metadata["decision_comment"] = strings.TrimSpace(comment)
+	}
+	spec.Metadata["decided_at"] = time.Now().UTC().Format(time.RFC3339)
+	_, err = updateHeimdallGuardianMemory(ctx, db, heimdallGuardianMemory{
+		Manifest: manifestRecord,
+		Spec:     spec,
+	})
+	return err
+}
+
+func createHeimdallGuardianMemory(
+	ctx context.Context,
+	db *sql.DB,
+	name string,
+	spec model.GuardianMemoryManifestSpec,
+) (heimdallGuardianMemory, error) {
+	spec = manifestengine.NormalizeGuardianMemorySpec(spec)
+	specRaw, err := json.Marshal(spec)
+	if err != nil {
+		return heimdallGuardianMemory{}, fmt.Errorf("marshal guardian_memory spec: %w", err)
+	}
+
+	manifestRecord, err := heimdallCreateManifestVersion(ctx, db, model.ManifestDocument{
+		APIVersion: "yggdrasil.io/v1alpha1",
+		Kind:       "guardian_memory",
+		Metadata: model.ManifestMetadataInput{
+			Name:        name,
+			Namespace:   "global",
+			Description: fmt.Sprintf("Heimdall memory for %s/%s", spec.ComponentNamespace, spec.ComponentName),
+			Labels:      heimdallGuardianMemoryLabels(spec),
+		},
+		Spec: specRaw,
+	})
+	if err != nil {
+		return heimdallGuardianMemory{}, err
+	}
+	return heimdallGuardianMemory{Manifest: manifestRecord, Spec: spec}, nil
+}
+
+func updateHeimdallGuardianMemory(
+	ctx context.Context,
+	db *sql.DB,
+	current heimdallGuardianMemory,
+) (heimdallGuardianMemory, error) {
+	current.Spec = manifestengine.NormalizeGuardianMemorySpec(current.Spec)
+	specRaw, err := json.Marshal(current.Spec)
+	if err != nil {
+		return heimdallGuardianMemory{}, fmt.Errorf("marshal guardian_memory spec: %w", err)
+	}
+	manifestRecord, err := heimdallCreateManifestVersion(ctx, db, model.ManifestDocument{
+		APIVersion: current.Manifest.APIVersion,
+		Kind:       current.Manifest.Kind,
+		Metadata: model.ManifestMetadataInput{
+			Name:        current.Manifest.Metadata.Name,
+			Namespace:   current.Manifest.Metadata.Namespace,
+			Description: current.Manifest.Metadata.Description,
+			Labels:      heimdallGuardianMemoryLabels(current.Spec),
+		},
+		Spec: specRaw,
+	})
+	if err != nil {
+		return heimdallGuardianMemory{}, err
+	}
+	current.Manifest = manifestRecord
+	return current, nil
+}
+
+func heimdallGuardianMemoryLabels(spec model.GuardianMemoryManifestSpec) map[string]string {
+	labels := map[string]string{
+		"guardian":        "heimdall",
+		"memory_status":   spec.Status,
+		"component_kind":  spec.ComponentKind,
+		"component_name":  spec.ComponentName,
+		"component_ns":    spec.ComponentNamespace,
+		"memory_source":   spec.Source,
+		"action_type":     strings.TrimSpace(anyString(spec.Action["type"])),
+	}
+	for key, value := range labels {
+		labels[key] = strings.TrimSpace(value)
+	}
+	return labels
+}
+
+func observeHeimdallGuardianMemories(
+	ctx context.Context,
+	db *sql.DB,
+	snapshot map[string]any,
+	memories []heimdallGuardianMemory,
+) error {
+	for _, memory := range memories {
+		if memory.Spec.Status != model.GuardianMemoryStatusExecuted {
+			continue
+		}
+		nextStatus, observation, ok := heimdallEvaluateMemoryObservation(snapshot, memory.Spec)
+		if !ok {
+			continue
+		}
+		memory.Spec.Status = nextStatus
+		memory.Spec.Observation = observation
+		if _, err := updateHeimdallGuardianMemory(ctx, db, memory); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func heimdallEvaluateMemoryObservation(
+	snapshot map[string]any,
+	spec model.GuardianMemoryManifestSpec,
+) (string, model.GuardianMemoryObservationSpec, bool) {
+	component := heimdallSnapshotComponent(snapshot, spec.ComponentKind, spec.ComponentNamespace, spec.ComponentName)
+	incidents := heimdallSnapshotIncidents(snapshot, spec.ComponentKind, spec.ComponentNamespace, spec.ComponentName)
+
+	health := "unknown"
+	if len(component) > 0 {
+		health = normalizeState(firstNonEmpty(anyString(component["overall_health"]), anyString(component["status"]), "unknown"))
+	}
+	criticalIncidents := 0
+	for _, incident := range incidents {
+		if normalizeSeverity(anyString(incident["severity"])) == "critical" {
+			criticalIncidents++
+		}
+	}
+
+	observation := model.GuardianMemoryObservationSpec{
+		ObservedAt:      time.Now().UTC().Format(time.RFC3339),
+		ComponentHealth: health,
+		IncidentCount:   len(incidents),
+	}
+
+	switch {
+	case len(component) == 0:
+		observation.Summary = "The component was not found in the latest ecosystem snapshot."
+		return model.GuardianMemoryStatusObservedUnchanged, observation, true
+	case criticalIncidents == 0 && !containsAnyString(health, "unreachable", "invalid_response", "contract_mismatch", "degraded", "failed", "disabled"):
+		observation.Summary = "The component looks healthy after the action."
+		return model.GuardianMemoryStatusObservedRecovered, observation, true
+	case criticalIncidents > 0 || containsAnyString(health, "unreachable", "invalid_response", "contract_mismatch"):
+		observation.Summary = "The component still looks unhealthy after the action."
+		return model.GuardianMemoryStatusObservedRegressed, observation, true
+	default:
+		observation.Summary = "The component changed, but the issue was not clearly resolved."
+		return model.GuardianMemoryStatusObservedUnchanged, observation, true
+	}
+}
+
+func heimdallSnapshotComponent(snapshot map[string]any, componentKind, componentNamespace, componentName string) map[string]any {
+	var collections [][]map[string]any
+	switch normalizeState(componentKind) {
+	case "surface":
+		collections = [][]map[string]any{objectSlice(snapshot["surfaces"])}
+	case "integration":
+		collections = [][]map[string]any{objectSlice(snapshot["integrations"])}
+	default:
+		collections = [][]map[string]any{objectSlice(snapshot["integrations"]), objectSlice(snapshot["surfaces"])}
+	}
+	for _, collection := range collections {
+		for _, item := range collection {
+			if normalizeState(firstNonEmpty(anyString(item["component_kind"]), anyString(item["kind"]), componentKind)) != normalizeState(componentKind) {
+				continue
+			}
+			if firstNonEmpty(anyString(item["component_namespace"]), anyString(item["namespace"]), "global") != firstNonEmpty(componentNamespace, "global") {
+				continue
+			}
+			if firstNonEmpty(anyString(item["component_name"]), anyString(item["name"])) != componentName {
+				continue
+			}
+			return cloneAuthorizationInput(item)
+		}
+	}
+	return map[string]any{}
+}
+
+func heimdallSnapshotIncidents(snapshot map[string]any, componentKind, componentNamespace, componentName string) []map[string]any {
+	items := objectSlice(snapshot["incidents"])
+	filtered := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if normalizeState(firstNonEmpty(anyString(item["component_kind"]), anyString(item["kind"]), componentKind)) != normalizeState(componentKind) {
+			continue
+		}
+		if firstNonEmpty(anyString(item["component_namespace"]), anyString(item["namespace"]), "global") != firstNonEmpty(componentNamespace, "global") {
+			continue
+		}
+		if firstNonEmpty(anyString(item["component_name"]), anyString(item["name"])) != componentName {
+			continue
+		}
+		filtered = append(filtered, cloneAuthorizationInput(item))
+	}
+	return filtered
+}
+
+func heimdallGuardianMemoryItems(memories []heimdallGuardianMemory) []map[string]any {
+	limit := len(memories)
+	if limit > 50 {
+		limit = 50
+	}
+	items := make([]map[string]any, 0, limit)
+	for _, memory := range memories[:limit] {
+		items = append(items, map[string]any{
+			"name":                memory.Manifest.Metadata.Name,
+			"namespace":           memory.Manifest.Metadata.Namespace,
+			"status":              memory.Spec.Status,
+			"source":              memory.Spec.Source,
+			"component_kind":      memory.Spec.ComponentKind,
+			"component_namespace": memory.Spec.ComponentNamespace,
+			"component_name":      memory.Spec.ComponentName,
+			"action_type":         strings.TrimSpace(anyString(memory.Spec.Action["type"])),
+			"action":              cloneAuthorizationInput(memory.Spec.Action),
+			"incident":            cloneAuthorizationInput(memory.Spec.Incident),
+			"evidence":            cloneAuthorizationInput(memory.Spec.Evidence),
+			"execution": map[string]any{
+				"attempted_at": memory.Spec.Execution.AttemptedAt,
+				"completed_at": memory.Spec.Execution.CompletedAt,
+				"error":        memory.Spec.Execution.Error,
+			},
+			"observation": map[string]any{
+				"observed_at":      memory.Spec.Observation.ObservedAt,
+				"summary":          memory.Spec.Observation.Summary,
+				"component_health": memory.Spec.Observation.ComponentHealth,
+				"incident_count":   memory.Spec.Observation.IncidentCount,
+			},
+			"created_at": memory.Manifest.CreatedAt.UTC().Format(time.RFC3339),
+			"updated_at": memory.Manifest.UpdatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return items
 }
 
 func heimdallCreateManifestVersion(ctx context.Context, db *sql.DB, doc model.ManifestDocument) (model.Manifest, error) {
@@ -1713,6 +2187,34 @@ func firstBool(values map[string]any, keys []string, fallback bool) bool {
 		}
 	}
 	return fallback
+}
+
+func objectSlice(value any) []map[string]any {
+	items, ok := value.([]map[string]any)
+	if ok {
+		return items
+	}
+	typed, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	output := make([]map[string]any, 0, len(typed))
+	for _, item := range typed {
+		mapped, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		output = append(output, mapped)
+	}
+	return output
+}
+
+func normalizeState(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func normalizeSeverity(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func containsAnyString(value string, patterns ...string) bool {
