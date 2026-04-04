@@ -8,6 +8,17 @@ official repositories in the `dakasa-yggdrasil` GitHub organization.
 Every repository that ships `.github/workflows/emit-deploy-event.yml` should
 configure:
 
+## Recommended GitHub scope strategy
+
+To reduce duplication, the best default is:
+
+- configure shared secrets at the `dakasa-yggdrasil` organization level
+- configure the common workflow variables at the organization level
+- keep only `YGGDRASIL_COMPONENT_KIND` and `YGGDRASIL_COMPONENT_NAME` as
+  repository-level overrides when needed
+
+That means most repositories can inherit the same baseline automatically.
+
 ### Required secrets
 
 - `YGGDRASIL_CORE_BASE_URL`
@@ -33,6 +44,13 @@ configure:
   - Usually the repository name, except for the reference surfaces below
 - `YGGDRASIL_DEPLOY_ENVIRONMENT`
   - Recommended: `production`
+
+Recommended organization-level defaults:
+
+- `YGGDRASIL_WORKFLOW_NAMESPACE=global`
+- `YGGDRASIL_WORKFLOW_NAME=ecosystem-repository-commit`
+- `YGGDRASIL_DEPLOY_WORKFLOW=deploy.yml`
+- `YGGDRASIL_DEPLOY_ENVIRONMENT=production`
 
 If a repository does not set the optional variables, the workflows still run
 with sane defaults. The purpose of the table below is to make those defaults
@@ -119,6 +137,20 @@ true in the running platform:
   repository workflows
 - if the core sets `YGGDRASIL_WORKFLOW_RUN_TOKEN`, repositories must also set
   the matching secret `YGGDRASIL_WORKFLOW_RUN_TOKEN`
+
+## Recommended github-caller instance settings
+
+In `yggdrasil-core`, the integration instance `global/github-caller` should be
+configured with:
+
+- credential `token`
+- config `api_base_url=https://api.github.com`
+- config `default_ref=main`
+- optional config `default_owner=dakasa-yggdrasil`
+- optional config `default_workflow=deploy.yml`
+
+The most important requirement is that the GitHub token can dispatch workflows
+in the target repositories.
 
 ## Recommended rollout order
 
