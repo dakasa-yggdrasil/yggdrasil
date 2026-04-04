@@ -1,0 +1,44 @@
+{
+  "apiVersion": "yggdrasil.io/v1alpha1",
+  "kind": "integration_instance",
+  "metadata": {
+    "name": "heimdall-guardian",
+    "namespace": "global",
+    "description": "Default Heimdall ecosystem guardian instance used by the core for ecosystem observation and remediation planning.",
+    "labels": {
+      "bootstrap_source": "integration-heimdall",
+      "provider": "heimdall"
+    }
+  },
+  "spec": {
+    "type_ref": {
+      "name": "heimdall",
+      "namespace": "global"
+    },
+    "status": "active",
+    "owners": [
+      "team:platform"
+    ],
+    "credentials": {},
+    "config": {
+      "guardian_name": "Heimdall",
+      "observation_scope": "global",
+      "critical_auto_remediation_enabled": false,
+      "recommendation_limit": 10,
+      "default_owner_team": "team:platform",
+      "default_repository_owner": "dakasa-yggdrasil",
+      "default_deploy_workflow": "deploy.yml",
+      "queue_backlog_threshold": 1000,
+      "error_rate_threshold": 0.2,
+      "secret_expiry_warning_hours": 72
+    },
+    "discovery": {
+      "enabled": false,
+      "mode": "manual"
+    },
+    "execution": {
+      "default_dry_run": true,
+      "max_batch_size": 50
+    }
+  }
+}

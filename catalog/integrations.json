@@ -29,6 +29,15 @@
       "description": "Operations plugin for Google Cloud provisioning and ecosystem automation."
     },
     {
+      "slug": "heimdall",
+      "repo_name": "integration-heimdall",
+      "display_name": "Heimdall",
+      "domain": "heimdall",
+      "section": "operations",
+      "repo_url": "https://github.com/dakasa-yggdrasil/integration-heimdall.git",
+      "description": "Guardian plugin that observes the ecosystem, recommends improvements, and prepares remediation plans for critical incidents."
+    },
+    {
       "slug": "kubernetes",
       "repo_name": "integration-kubernetes",
       "display_name": "Kubernetes",

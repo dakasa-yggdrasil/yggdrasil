@@ -10,6 +10,8 @@ Current catalog view:
   - `operations/api` -> `aws-integration-type.json`
 - `gcp`
   - `operations/api` -> `gcp-integration-type.json`
+- `heimdall`
+  - `operations/guardian` -> `heimdall-integration-type.json`
 - `github`
   - `operations/api` -> `github-integration-type.json`
 - `grafana`
@@ -27,6 +29,7 @@ Current bootstrap instances:
   - covers `S3`, `ECR`, `Secrets Manager`, `Route53`, `SES` and `SNS`
 - `kubernetes-platform-prod.json`
 - `github-caller.json`
+- `heimdall-guardian.json`
 - `gcp-platform.json`
 - `grafana-platform-api.json`
 - `grafana-on-kubernetes-platform-prod.json`
