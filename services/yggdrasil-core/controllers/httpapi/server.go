@@ -168,6 +168,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/surfaces", server.handleSurfaceCreate)
 	mux.HandleFunc("GET /api/v1/workflows", server.handleWorkflowList)
 	mux.HandleFunc("POST /api/v1/workflows", server.handleWorkflowCreate)
+	mux.HandleFunc("POST /api/v1/workflow-runs", server.handleWorkflowRun)
 	mux.HandleFunc("GET /api/v1/console/integration-catalog", server.handleIntegrationCatalogList)
 	mux.HandleFunc("GET /api/v1/console/integration-catalog/{domain}/{section}/{entry}", server.handleIntegrationCatalogEntry)
 	mux.HandleFunc("GET /api/v1/console/catalog-discovery", server.handleCatalogDiscovery)
@@ -199,6 +200,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/console/surfaces", server.handleSurfaceCreate)
 	mux.HandleFunc("GET /api/v1/console/workflows", server.handleWorkflowList)
 	mux.HandleFunc("POST /api/v1/console/workflows", server.handleWorkflowCreate)
+	mux.HandleFunc("POST /api/v1/console/workflow-runs", server.handleWorkflowRun)
 
 	return server.withLogging(mux), nil
 }
@@ -799,6 +801,8 @@ func httpStatusFromError(err error) int {
 		return http.StatusOK
 	case errors.Is(err, messagecontroller.ErrAdapterTransportUnavailable):
 		return http.StatusServiceUnavailable
+	case errors.Is(err, errWorkflowRunUnauthorized):
+		return http.StatusUnauthorized
 	case errors.Is(err, repository.ErrAuthInvalidCredentials),
 		errors.Is(err, repository.ErrAuthSessionNotFound),
 		errors.Is(err, repository.ErrAuthSessionExpired),

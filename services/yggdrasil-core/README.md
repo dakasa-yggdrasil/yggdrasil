@@ -203,6 +203,17 @@ Additional direct core endpoints now include:
 - `/api/v1/products`
 - `/api/v1/surfaces`
 - `/api/v1/workflows`
+- `/api/v1/workflow-runs`
+
+`POST /api/v1/workflow-runs` is the synchronous dog-food entrypoint for CI and
+repository automation. It executes one stored workflow manifest directly over
+HTTP instead of RabbitMQ.
+
+When `YGGDRASIL_WORKFLOW_RUN_TOKEN` is configured on the core, callers must
+send either:
+
+- `X-Yggdrasil-Workflow-Token: <token>`
+- `Authorization: Bearer <token>`
 
 The intended split is:
 
@@ -676,6 +687,13 @@ The manifest should store stable dispatch defaults in `spec.defaults`, for examp
 - `inputs`
 
 Runtime callers then send only contextual overrides such as `ref`, `build_name`, `env_type`, and `component_id`.
+
+The bootstrap workflow
+[`ecosystem-repository-commit.json`](/Users/dakasa/projects/yggdrasil/services/yggdrasil-core/docs/bootstrap/manifests/workflows/ecosystem-repository-commit.json)
+is the reference dog-food template for this flow. Repository GitHub Actions can
+POST one commit event into `/api/v1/workflow-runs`, and the core will dispatch
+that repository's `deploy.yml` through the configured global GitHub
+integration.
 
 ## Example RBAC manifest payload
 

@@ -158,6 +158,31 @@ um subconjunto representativo de runtime dentro do monorepo e fecha com o smoke
 end-to-end de `core + auth + console`, incluindo leituras e escritas mínimas
 pela entrada `/api` do console.
 
+## Dogfooding workflows
+
+The product repo now ships two reference GitHub Actions workflows:
+
+- [`.github/workflows/emit-deploy-event.yml`](/Users/dakasa/projects/yggdrasil/.github/workflows/emit-deploy-event.yml)
+- [`.github/workflows/deploy.yml`](/Users/dakasa/projects/yggdrasil/.github/workflows/deploy.yml)
+
+The intended flow is:
+
+1. a commit lands on `main`
+2. `emit-deploy-event.yml` posts one workflow run request into `yggdrasil-core`
+3. the bootstrap core workflow `global/ecosystem-repository-commit` dispatches this repository's `deploy.yml` through the global GitHub integration
+4. `deploy.yml` performs the repository-local validation/build/deploy work
+
+Repository configuration:
+
+- `YGGDRASIL_CORE_BASE_URL` secret: required for commit event emission
+- `YGGDRASIL_WORKFLOW_RUN_TOKEN` secret: optional shared token for `/api/v1/workflow-runs`
+- `YGGDRASIL_WORKFLOW_NAMESPACE` variable: optional, defaults to `global`
+- `YGGDRASIL_WORKFLOW_NAME` variable: optional, defaults to `ecosystem-repository-commit`
+- `YGGDRASIL_DEPLOY_WORKFLOW` variable: optional, defaults to `deploy.yml`
+- `YGGDRASIL_COMPONENT_KIND` variable: optional, defaults to `product` in this repository
+- `YGGDRASIL_COMPONENT_NAME` variable: optional, defaults to the repository name
+- `YGGDRASIL_DEPLOY_ENVIRONMENT` variable: optional, defaults to `production`
+
 Valide também os artefatos de produção:
 
 ```bash

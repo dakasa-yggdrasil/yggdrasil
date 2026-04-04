@@ -1,0 +1,96 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      component_kind:
+        description: Ecosystem component kind.
+        required: false
+        default: product
+        type: string
+      component_name:
+        description: Stable ecosystem component name.
+        required: false
+        default: yggdrasil
+        type: string
+      commit_sha:
+        description: Source commit SHA forwarded by the core workflow.
+        required: false
+        default: ""
+        type: string
+      actor:
+        description: Actor that triggered the source event.
+        required: false
+        default: ""
+        type: string
+      event_name:
+        description: Source event name.
+        required: false
+        default: workflow_dispatch
+        type: string
+      environment:
+        description: Target environment label.
+        required: false
+        default: production
+        type: string
+      commit_message:
+        description: Optional source commit message.
+        required: false
+        default: ""
+        type: string
+      source_run_url:
+        description: Optional source GitHub Actions run URL.
+        required: false
+        default: ""
+        type: string
+      source_run_id:
+        description: Optional source GitHub Actions run ID.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Task
+        uses: arduino/setup-task@v2
+
+      - name: Summarize deploy request
+        shell: bash
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## Yggdrasil deploy request
+
+          - Component: \`${{ inputs.component_kind }}:${{ inputs.component_name }}\`
+          - Environment: \`${{ inputs.environment }}\`
+          - Source event: \`${{ inputs.event_name }}\`
+          - Source actor: \`${{ inputs.actor || 'unknown' }}\`
+          - Source SHA: \`${{ inputs.commit_sha || github.sha }}\`
+          EOF
+
+          if [ -n "${{ inputs.source_run_url }}" ]; then
+            echo "- Source run: ${{ inputs.source_run_url }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Verify toolchain
+        run: task doctor
+
+      - name: Check architecture boundaries
+        run: task arch:check
+
+      - name: Validate compose configuration
+        run: task config
+
+      - name: Build production images
+        run: task build:images

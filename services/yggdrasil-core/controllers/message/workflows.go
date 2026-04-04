@@ -70,32 +70,51 @@ func workflowRunHandler(conn *amqp.Connection, db *sql.DB, logger *zap.Logger) C
 			return replyFailure(ctx, conn, d, "bad_request", err, logger)
 		}
 
-		req = normalizeRunWorkflowRequest(req)
-		if err := validateRunWorkflowRequest(req); err != nil {
-			return replyFailure(ctx, conn, d, "bad_request", err, logger)
-		}
-
-		workflowManifest, spec, err := resolveWorkflowManifestSpec(ctx, db, req.Workflow)
+		response, err := RunWorkflow(ctx, conn, db, req)
 		if err != nil {
-			return replyFailure(ctx, conn, d, manifestLookupErrorCode(err), err, logger)
-		}
-
-		if err := manifestengine.ValidateWorkflowSpec(spec); err != nil {
-			return replyFailure(ctx, conn, d, "bad_request", err, logger)
-		}
-		mergedInputs := manifestengine.MergeWorkflowInputs(spec, req.Inputs)
-		if err := manifestengine.ValidateWorkflowInputs(spec, mergedInputs); err != nil {
-			return replyFailure(ctx, conn, d, "bad_request", err, logger)
-		}
-		req.Inputs = mergedInputs
-
-		response, err := runWorkflow(ctx, conn, db, workflowManifest, spec, req)
-		if err != nil {
-			return replyFailure(ctx, conn, d, integrationAwareErrorCode(err, "workflow_run_failed"), err, logger)
+			code := integrationAwareErrorCode(err, "workflow_run_failed")
+			if manifestLookupErrorCode(err) != "internal_error" {
+				code = manifestLookupErrorCode(err)
+			} else if strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "required") ||
+				strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "invalid") ||
+				strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "unsupported") ||
+				strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "validation") {
+				code = "bad_request"
+			}
+			return replyFailure(ctx, conn, d, code, err, logger)
 		}
 
 		return replySuccess(ctx, conn, d, response, logger)
 	}
+}
+
+// RunWorkflow executes one stored workflow definition directly from an in-process caller.
+func RunWorkflow(
+	ctx context.Context,
+	conn *amqp.Connection,
+	db *sql.DB,
+	req model.RunWorkflowRequest,
+) (model.RunWorkflowResponse, error) {
+	req = normalizeRunWorkflowRequest(req)
+	if err := validateRunWorkflowRequest(req); err != nil {
+		return model.RunWorkflowResponse{}, err
+	}
+
+	workflowManifest, spec, err := resolveWorkflowManifestSpec(ctx, db, req.Workflow)
+	if err != nil {
+		return model.RunWorkflowResponse{}, err
+	}
+
+	if err := manifestengine.ValidateWorkflowSpec(spec); err != nil {
+		return model.RunWorkflowResponse{}, err
+	}
+	mergedInputs := manifestengine.MergeWorkflowInputs(spec, req.Inputs)
+	if err := manifestengine.ValidateWorkflowInputs(spec, mergedInputs); err != nil {
+		return model.RunWorkflowResponse{}, err
+	}
+	req.Inputs = mergedInputs
+
+	return runWorkflow(ctx, conn, db, workflowManifest, spec, req)
 }
 
 func resolveWorkflowManifestSpec(ctx context.Context, db *sql.DB, selector model.ManifestSelector) (model.Manifest, model.WorkflowManifestSpec, error) {
