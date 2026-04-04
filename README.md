@@ -152,6 +152,10 @@ task smoke
 task install:smoke
 ```
 
+`task install:smoke` valida um workspace isolado com as surfaces de referência,
+instala todo o catálogo remoto de integrations, valida o compose agregado e sobe
+um subconjunto representativo de runtime dentro do monorepo.
+
 Valide também os artefatos de produção:
 
 ```bash

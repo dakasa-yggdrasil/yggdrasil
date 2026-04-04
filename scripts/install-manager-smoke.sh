@@ -7,12 +7,23 @@ mkdir -p "$SHARED_TMP_ROOT"
 WORKDIR="$(mktemp -d "$SHARED_TMP_ROOT/ygg-install-smoke.XXXXXX")"
 REPO_DIR="$WORKDIR/repo"
 PROJECT_NAME="ygg-install-smoke-$(date +%s)"
+RUNTIME_SMOKE_SERVICES=(
+  "integration-aws"
+  "integration-github"
+  "integration-rabbitmq"
+  "integration-grafana"
+)
 
 cleanup() {
   if [ -d "$REPO_DIR/.git" ]; then
     COMPOSE_PROJECT_NAME="$PROJECT_NAME" "$REPO_DIR/scripts/docker-compose.sh" down --remove-orphans >/dev/null 2>&1 || true
   fi
-  rm -rf "$WORKDIR"
+  rm -rf "$WORKDIR" >/dev/null 2>&1 && return 0
+  if command -v docker >/dev/null 2>&1 && [ -d "$WORKDIR" ]; then
+    docker run --rm -v "$WORKDIR":/workspace postgres:17-alpine sh -lc \
+      'rm -rf /workspace/* /workspace/.[!.]* /workspace/..?* 2>/dev/null || true' >/dev/null 2>&1 || true
+  fi
+  rm -rf "$WORKDIR" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -35,6 +46,21 @@ dump_compose_logs() {
   if [ -d "$REPO_DIR/.git" ]; then
     COMPOSE_PROJECT_NAME="$PROJECT_NAME" "$REPO_DIR/scripts/docker-compose.sh" logs --no-color || true
   fi
+}
+
+wait_for_running_service() {
+  local service="$1"
+  local attempts="${2:-60}"
+  local sleep_seconds="${3:-2}"
+
+  for ((i = 1; i <= attempts; i++)); do
+    if COMPOSE_PROJECT_NAME="$PROJECT_NAME" "$REPO_DIR/scripts/docker-compose.sh" ps --services --status running | grep -qx "$service"; then
+      return 0
+    fi
+    sleep "$sleep_seconds"
+  done
+
+  return 1
 }
 
 echo "Preparing isolated workspace at $REPO_DIR"
@@ -90,36 +116,90 @@ unset YGGDRASIL_INTEGRATIONS_DEV_DIR
 
 cd "$REPO_DIR"
 
+catalog_integrations=()
+while IFS= read -r entry; do
+  catalog_integrations+=("$entry")
+done < <(python3 - <<'PY'
+import json
+
+with open("catalog/integrations.json", "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+
+for integration in data.get("integrations", []):
+    print(
+        "|".join(
+            [
+                integration["slug"],
+                integration["repo_name"],
+                integration["repo_url"],
+            ]
+        )
+    )
+PY
+)
+
 echo "Installing reference surfaces from remote repositories..."
 ./scripts/ygg.sh surfaces install yggdrasil-auth-surface >/dev/null
 ./scripts/ygg.sh surfaces install yggdrasil-console >/dev/null
 
-echo "Installing catalog integrations from remote repositories..."
-./scripts/ygg.sh integrations install aws >/dev/null
-./scripts/ygg.sh integrations install github >/dev/null
+echo "Installing all catalog integrations from remote repositories..."
+for entry in "${catalog_integrations[@]}"; do
+  IFS='|' read -r slug _ _ <<<"$entry"
+  ./scripts/ygg.sh integrations install "$slug" >/dev/null
+done
 
 task env:init >/dev/null
 
-aws_url="$(git config -f .gitmodules --get submodule.integrations/integration-aws.url)"
-github_url="$(git config -f .gitmodules --get submodule.integrations/integration-github.url)"
 auth_url="$(git config -f .gitmodules --get submodule.surfaces/yggdrasil-auth-surface.url)"
 console_url="$(git config -f .gitmodules --get submodule.surfaces/yggdrasil-console.url)"
 
-test "$aws_url" = "https://github.com/dakasa-yggdrasil/integration-aws.git"
-test "$github_url" = "https://github.com/dakasa-yggdrasil/integration-github.git"
 test "$auth_url" = "https://github.com/dakasa-yggdrasil/surface-auth.git"
 test "$console_url" = "https://github.com/dakasa-yggdrasil/surface-console.git"
 
+for entry in "${catalog_integrations[@]}"; do
+  IFS='|' read -r _ repo_name repo_url <<<"$entry"
+  actual_url="$(git config -f .gitmodules --get "submodule.integrations/${repo_name}.url")"
+  test "$actual_url" = "$repo_url"
+done
+
 ./scripts/ygg.sh surfaces installed | grep -q 'surfaces/yggdrasil-auth-surface/docker-compose.yml'
 ./scripts/ygg.sh surfaces installed | grep -q 'surfaces/yggdrasil-console/docker-compose.yml'
-./scripts/ygg.sh integrations installed | grep -q 'integrations/integration-aws/docker-compose.yml'
-./scripts/ygg.sh integrations installed | grep -q 'integrations/integration-github/docker-compose.yml'
+
+for entry in "${catalog_integrations[@]}"; do
+  IFS='|' read -r _ repo_name _ <<<"$entry"
+  ./scripts/ygg.sh integrations installed | grep -q "integrations/${repo_name}/docker-compose.yml"
+done
 
 echo "Validating compose in isolated workspace..."
 COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh config >/dev/null
 
-echo "Bringing isolated stack up..."
-COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh up -d >/dev/null
+echo "Starting shared infra in isolated workspace..."
+if ! COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh up -d \
+  yggdrasil-postgres \
+  yggdrasil-rabbitmq >/dev/null; then
+  dump_compose_logs
+  echo "isolated shared infra failed to start" >&2
+  exit 1
+fi
+
+for service in yggdrasil-postgres yggdrasil-rabbitmq; do
+  if ! wait_for_running_service "$service" 30 2; then
+    dump_compose_logs
+    echo "expected ${service} to be running before starting the rest of the stack" >&2
+    exit 1
+  fi
+done
+
+echo "Bringing isolated core and representative integrations up..."
+if ! COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh up -d \
+  yggdrasil-core \
+  yggdrasil-auth-surface \
+  yggdrasil-console \
+  "${RUNTIME_SMOKE_SERVICES[@]}" >/dev/null; then
+  dump_compose_logs
+  echo "isolated core/runtime slice failed to start" >&2
+  exit 1
+fi
 
 echo "Waiting for isolated core..."
 if ! wait_for_url "http://127.0.0.1:19080/readyz" 120 2; then
@@ -152,10 +232,10 @@ if ! wait_for_url "http://127.0.0.1:13080/healthz" 120 2; then
   exit 1
 fi
 
-for service in integration-aws integration-github; do
-  if ! COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh ps --services --status running | grep -qx "$service"; then
+for service in "${RUNTIME_SMOKE_SERVICES[@]}"; do
+  if ! wait_for_running_service "$service" 90 2; then
     dump_compose_logs
-    echo "expected $service to be running in the isolated workspace" >&2
+    echo "expected ${service} to be running in the isolated workspace" >&2
     exit 1
   fi
 done
