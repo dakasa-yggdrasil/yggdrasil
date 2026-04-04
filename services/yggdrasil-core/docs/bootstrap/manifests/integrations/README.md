@@ -30,6 +30,7 @@ Current bootstrap instances:
 - `kubernetes-platform-prod.json`
 - `github-caller.json`
 - `heimdall-guardian.json`
+  - covers ecosystem health, remediation planning, and cost optimization
 - `gcp-platform.json`
 - `grafana-platform-api.json`
 - `grafana-on-kubernetes-platform-prod.json`

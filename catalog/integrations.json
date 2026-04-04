@@ -35,7 +35,7 @@
       "domain": "heimdall",
       "section": "operations",
       "repo_url": "https://github.com/dakasa-yggdrasil/integration-heimdall.git",
-      "description": "Guardian plugin that observes the ecosystem, recommends improvements, and prepares remediation plans for critical incidents."
+      "description": "Guardian plugin that observes the ecosystem, recommends improvements, optimizes cost, and prepares remediation plans for critical incidents."
     },
     {
       "slug": "kubernetes",

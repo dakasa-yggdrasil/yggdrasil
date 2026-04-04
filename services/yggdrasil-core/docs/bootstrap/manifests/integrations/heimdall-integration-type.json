@@ -83,6 +83,25 @@
           "type": "integer",
           "description": "Warn when managed secrets expire within this many hours.",
           "default": 72
+        },
+        "monthly_cost_budget_usd": {
+          "type": "number",
+          "description": "Optional monthly cost budget used to flag budget pressure."
+        },
+        "utilization_floor": {
+          "type": "number",
+          "description": "Utilization floor below which a component is considered overprovisioned.",
+          "default": 0.35
+        },
+        "idle_environment_hours": {
+          "type": "integer",
+          "description": "Number of idle hours after which a component becomes a scale-down candidate.",
+          "default": 24
+        },
+        "max_rightsize_change_percent": {
+          "type": "integer",
+          "description": "Maximum bounded right-sizing step Heimdall should suggest in one action.",
+          "default": 25
         }
       }
     },
@@ -124,6 +143,15 @@
         "default_actions": [
           "recommend_improvements"
         ]
+      },
+      {
+        "name": "cost_optimization_plan",
+        "canonical_prefix": "thirdparty.heimdall.cost_optimization_plan",
+        "identity_template": "cost_optimization_plan.{scope}",
+        "discoverable": false,
+        "default_actions": [
+          "optimize_cost"
+        ]
       }
     ],
     "action_catalog": [
@@ -160,6 +188,15 @@
           "remediation_plan"
         ],
         "idempotent": true
+      },
+      {
+        "name": "optimize_cost",
+        "description": "Inspect cost signals and right-size opportunities across the ecosystem.",
+        "resource_types": [
+          "ecosystem_snapshot",
+          "cost_optimization_plan"
+        ],
+        "idempotent": true
       }
     ],
     "discovery": {
@@ -178,7 +215,8 @@
         "assess_ecosystem",
         "recommend_improvements",
         "triage_critical_error",
-        "auto_remediate_critical"
+        "auto_remediate_critical",
+        "optimize_cost"
       ]
     },
     "extensions": {

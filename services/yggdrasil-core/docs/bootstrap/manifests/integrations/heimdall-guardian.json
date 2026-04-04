@@ -30,7 +30,11 @@
       "default_deploy_workflow": "deploy.yml",
       "queue_backlog_threshold": 1000,
       "error_rate_threshold": 0.2,
-      "secret_expiry_warning_hours": 72
+      "secret_expiry_warning_hours": 72,
+      "monthly_cost_budget_usd": 1500,
+      "utilization_floor": 0.35,
+      "idle_environment_hours": 24,
+      "max_rightsize_change_percent": 25
     },
     "discovery": {
       "enabled": false,
