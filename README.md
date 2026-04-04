@@ -165,6 +165,9 @@ The product repo now ships two reference GitHub Actions workflows:
 - [`.github/workflows/emit-deploy-event.yml`](/Users/dakasa/projects/yggdrasil/.github/workflows/emit-deploy-event.yml)
 - [`.github/workflows/deploy.yml`](/Users/dakasa/projects/yggdrasil/.github/workflows/deploy.yml)
 
+`emit-deploy-event.yml` now delegates the HTTP call to the official GitHub
+Action [`dakasa-yggdrasil/action-emit-workflow-run`](https://github.com/dakasa-yggdrasil/action-emit-workflow-run).
+
 The intended flow is:
 
 1. a commit lands on `main`

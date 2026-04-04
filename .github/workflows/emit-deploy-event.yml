@@ -37,92 +37,14 @@ jobs:
 
       - name: Emit deploy event into yggdrasil-core
         if: ${{ secrets.YGGDRASIL_CORE_BASE_URL != '' }}
-        shell: bash
-        env:
-          YGGDRASIL_CORE_BASE_URL: ${{ secrets.YGGDRASIL_CORE_BASE_URL }}
-          YGGDRASIL_WORKFLOW_RUN_TOKEN: ${{ secrets.YGGDRASIL_WORKFLOW_RUN_TOKEN }}
-          YGGDRASIL_WORKFLOW_NAMESPACE: ${{ vars.YGGDRASIL_WORKFLOW_NAMESPACE }}
-          YGGDRASIL_WORKFLOW_NAME: ${{ vars.YGGDRASIL_WORKFLOW_NAME }}
-          YGGDRASIL_DEPLOY_WORKFLOW: ${{ vars.YGGDRASIL_DEPLOY_WORKFLOW }}
-          YGGDRASIL_COMPONENT_KIND: ${{ vars.YGGDRASIL_COMPONENT_KIND }}
-          YGGDRASIL_COMPONENT_NAME: ${{ vars.YGGDRASIL_COMPONENT_NAME }}
-          YGGDRASIL_DEPLOY_ENVIRONMENT: ${{ vars.YGGDRASIL_DEPLOY_ENVIRONMENT }}
-          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
-          INPUT_REF: ${{ github.event.inputs.ref }}
-          INPUT_DEPLOY_WORKFLOW: ${{ github.event.inputs.deploy_workflow }}
-          GITHUB_EVENT_NAME_VALUE: ${{ github.event_name }}
-          GITHUB_REF_NAME_VALUE: ${{ github.ref_name }}
-          GITHUB_REPOSITORY_VALUE: ${{ github.repository }}
-          GITHUB_SHA_VALUE: ${{ github.sha }}
-          GITHUB_ACTOR_VALUE: ${{ github.actor }}
-          GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
-          GITHUB_RUN_ATTEMPT_VALUE: ${{ github.run_attempt }}
-          GITHUB_WORKFLOW_VALUE: ${{ github.workflow }}
-          GITHUB_SERVER_URL_VALUE: ${{ github.server_url }}
-          GITHUB_HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-        run: |
-          component_name="${YGGDRASIL_COMPONENT_NAME:-${GITHUB_REPOSITORY_VALUE#*/}}"
-          component_kind="${YGGDRASIL_COMPONENT_KIND:-product}"
-          workflow_namespace="${YGGDRASIL_WORKFLOW_NAMESPACE:-global}"
-          workflow_name="${YGGDRASIL_WORKFLOW_NAME:-ecosystem-repository-commit}"
-          deploy_workflow="${INPUT_DEPLOY_WORKFLOW:-${YGGDRASIL_DEPLOY_WORKFLOW:-deploy.yml}}"
-          target_ref="${INPUT_REF:-${GITHUB_REF_NAME_VALUE}}"
-          environment_name="${INPUT_ENVIRONMENT:-${YGGDRASIL_DEPLOY_ENVIRONMENT:-production}}"
-          run_url="${GITHUB_SERVER_URL_VALUE}/${GITHUB_REPOSITORY_VALUE}/actions/runs/${GITHUB_RUN_ID_VALUE}"
-
-          auth_headers=()
-          if [ -n "${YGGDRASIL_WORKFLOW_RUN_TOKEN:-}" ]; then
-            auth_headers=(-H "X-Yggdrasil-Workflow-Token: ${YGGDRASIL_WORKFLOW_RUN_TOKEN}")
-          fi
-
-          export COMPONENT_NAME="${component_name}"
-          export COMPONENT_KIND="${component_kind}"
-          export WORKFLOW_NAMESPACE="${workflow_namespace}"
-          export WORKFLOW_NAME="${workflow_name}"
-          export DEPLOY_WORKFLOW="${deploy_workflow}"
-          export TARGET_REF="${target_ref}"
-          export ENVIRONMENT_NAME="${environment_name}"
-          export RUN_URL="${run_url}"
-
-          python3 - <<'PY' > /tmp/yggdrasil-workflow-run.json
-          import json
-          import os
-
-          payload = {
-              "workflow": {
-                  "namespace": os.environ["WORKFLOW_NAMESPACE"],
-                  "name": os.environ["WORKFLOW_NAME"],
-              },
-              "inputs": {
-                  "repository": os.environ["GITHUB_REPOSITORY_VALUE"],
-                  "ref": os.environ["TARGET_REF"],
-                  "component_kind": os.environ["COMPONENT_KIND"],
-                  "component_name": os.environ["COMPONENT_NAME"],
-                  "deploy_workflow": os.environ["DEPLOY_WORKFLOW"],
-                  "commit_sha": os.environ.get("GITHUB_SHA_VALUE", ""),
-                  "actor": os.environ.get("GITHUB_ACTOR_VALUE", ""),
-                  "event_name": os.environ.get("GITHUB_EVENT_NAME_VALUE", ""),
-                  "environment": os.environ.get("ENVIRONMENT_NAME", ""),
-                  "commit_message": os.environ.get("GITHUB_HEAD_COMMIT_MESSAGE", "") or "",
-                  "source_run_url": os.environ.get("RUN_URL", ""),
-                  "source_run_id": os.environ.get("GITHUB_RUN_ID_VALUE", ""),
-              },
-              "metadata": {
-                  "source": "github_actions",
-                  "source_repository": os.environ.get("GITHUB_REPOSITORY_VALUE", ""),
-                  "source_workflow": os.environ.get("GITHUB_WORKFLOW_VALUE", ""),
-                  "source_run_id": os.environ.get("GITHUB_RUN_ID_VALUE", ""),
-                  "source_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT_VALUE", ""),
-                  "source_sha": os.environ.get("GITHUB_SHA_VALUE", ""),
-                  "source_ref": os.environ.get("GITHUB_REF_NAME_VALUE", ""),
-              },
-          }
-
-          print(json.dumps(payload))
-          PY
-
-          curl --fail-with-body --silent --show-error \
-            -H "Content-Type: application/json" \
-            "${auth_headers[@]}" \
-            --data @/tmp/yggdrasil-workflow-run.json \
-            "${YGGDRASIL_CORE_BASE_URL%/}/api/v1/workflow-runs"
+        uses: dakasa-yggdrasil/action-emit-workflow-run@v1
+        with:
+          core_base_url: ${{ secrets.YGGDRASIL_CORE_BASE_URL }}
+          workflow_run_token: ${{ secrets.YGGDRASIL_WORKFLOW_RUN_TOKEN }}
+          workflow_namespace: ${{ vars.YGGDRASIL_WORKFLOW_NAMESPACE || 'global' }}
+          workflow_name: ${{ vars.YGGDRASIL_WORKFLOW_NAME || 'ecosystem-repository-commit' }}
+          component_kind: ${{ vars.YGGDRASIL_COMPONENT_KIND || 'product' }}
+          component_name: ${{ vars.YGGDRASIL_COMPONENT_NAME || github.event.repository.name }}
+          environment: ${{ github.event.inputs.environment || vars.YGGDRASIL_DEPLOY_ENVIRONMENT || 'production' }}
+          deploy_workflow: ${{ github.event.inputs.deploy_workflow || vars.YGGDRASIL_DEPLOY_WORKFLOW || 'deploy.yml' }}
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
