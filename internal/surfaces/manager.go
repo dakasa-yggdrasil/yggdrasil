@@ -279,11 +279,6 @@ func (m *Manager) localSourcePath(entry Surface) string {
 		}
 	}
 
-	sibling := filepath.Join(filepath.Dir(m.root), entry.RepoName)
-	if isGitRepo(sibling) {
-		return sibling
-	}
-
 	return ""
 }
 

@@ -25,6 +25,10 @@ tasks:
           cp ./.env.example ./.env
         fi
       - |
+        if [ ! -f ./dev/compose/.env ]; then
+          cp ./.env ./dev/compose/.env
+        fi
+      - |
         find ./services ./surfaces ./integrations -name '.env.example' | sort | while read -r file; do
           target="${file%.example}"
           if [ ! -f "$target" ]; then
@@ -80,6 +84,11 @@ tasks:
     cmds:
       - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh restart yggdrasil-core yggdrasil-auth-surface yggdrasil-console
       - ./scripts/smoke.sh
+
+  install:smoke:
+    desc: Validate installation-manager flows against real remote repositories in an isolated workspace
+    cmds:
+      - ./scripts/install-manager-smoke.sh
 
   build:images:
     desc: Build production images for the core and reference surfaces

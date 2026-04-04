@@ -101,6 +101,6 @@ func (m tuiModel) View() string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, "Dica: exporte YGGDRASIL_INTEGRATIONS_DEV_DIR para preferir repositórios locais ao instalar.")
+	lines = append(lines, "Dica: defina YGGDRASIL_INTEGRATIONS_DEV_DIR só quando quiser usar repositórios locais de forma explícita.")
 	return strings.Join(lines, "\n")
 }

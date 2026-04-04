@@ -115,6 +115,15 @@ Também dá para usar a CLI diretamente:
 ./scripts/ygg.sh integrations install rabbitmq
 ```
 
+Se você quiser forçar instalação a partir de repositórios locais durante desenvolvimento, isso agora é opt-in explícito:
+
+```bash
+export YGGDRASIL_SURFACES_DEV_DIR=/caminho/para/repos-de-surfaces
+export YGGDRASIL_INTEGRATIONS_DEV_DIR=/caminho/para/repos-de-integrations
+```
+
+Sem essas variáveis, o installation manager sempre usa os repositórios remotos do catálogo.
+
 Inicialize os arquivos `.env`:
 
 ```bash
@@ -137,6 +146,7 @@ Rode o smoke end-to-end do produto:
 
 ```bash
 task smoke
+task install:smoke
 ```
 
 Valide também os artefatos de produção:

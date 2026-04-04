@@ -28,6 +28,7 @@ task up
 task bootstrap:core
 task open:console
 task build:images
+task install:smoke
 ```
 
 Se quiser instalar integrations de forma interativa:
@@ -123,10 +124,12 @@ O Postgres compartilhado cria:
 - use `task config` antes do primeiro `task up` de um slice se estiver ajustando compose
 - use `task arch:check` quando mexer em fronteiras entre serviços
 - use `task bootstrap:core` depois do primeiro `task up` completo para carregar manifests bootstrap
+- use `task install:smoke` para validar que surfaces e integrations do catálogo instalam corretamente a partir dos repositórios remotos
 - use `task integrations:list` para ver o catálogo disponível
 - use `task surfaces:list` para ver o catálogo de surfaces disponível
 - use `task surfaces:install NAME=<slug>` para instalar uma surface de referência
 - prefira criar novas surfaces a partir de [`surface-template`](https://github.com/dakasa-yggdrasil/surface-template)
 - use `task surfaces:scaffold NAME=<slug>` só quando quiser um scaffold local rápido dentro do workspace
 - use `task integrations:install NAME=<slug>` para instalar uma integration específica
+- para desenvolvimento com cópias locais fora do monorepo, defina `YGGDRASIL_SURFACES_DEV_DIR` e `YGGDRASIL_INTEGRATIONS_DEV_DIR`; sem isso, o installation manager usa apenas os remotos do catálogo
 - se precisar resetar tudo, faça isso no root com `task down` e depois remova volumes manualmente no Docker Desktop

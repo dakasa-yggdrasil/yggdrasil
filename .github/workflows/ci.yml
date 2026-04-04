@@ -45,3 +45,20 @@ jobs:
       - name: Stop local stack
         if: always()
         run: task down
+
+  installation-manager:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Task
+        uses: arduino/setup-task@v2
+
+      - name: Verify toolchain
+        run: task doctor
+
+      - name: Validate installation manager with real remotes
+        run: task install:smoke
