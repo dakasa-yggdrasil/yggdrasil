@@ -58,7 +58,12 @@ func ValidateGuardianMemorySpec(spec model.GuardianMemoryManifestSpec) error {
 	if err := validateLooseObject("guardian_memory metadata", spec.Metadata); err != nil {
 		return err
 	}
-	for _, value := range []string{spec.Execution.AttemptedAt, spec.Execution.CompletedAt, spec.Observation.ObservedAt} {
+	for _, value := range []string{
+		spec.Execution.AttemptedAt,
+		spec.Execution.CompletedAt,
+		spec.Observation.ObservedAt,
+		spec.Observation.LastObservedAt,
+	} {
 		if strings.TrimSpace(value) == "" {
 			continue
 		}
@@ -68,6 +73,15 @@ func ValidateGuardianMemorySpec(spec model.GuardianMemoryManifestSpec) error {
 	}
 	if spec.Observation.IncidentCount < 0 {
 		return fmt.Errorf("guardian_memory observation incident_count cannot be negative")
+	}
+	if spec.Observation.ObservationCount < 0 {
+		return fmt.Errorf("guardian_memory observation observation_count cannot be negative")
+	}
+	if spec.Observation.TimeToRecoverySeconds < 0 {
+		return fmt.Errorf("guardian_memory observation time_to_recovery_seconds cannot be negative")
+	}
+	if spec.Observation.StableWindowSeconds < 0 {
+		return fmt.Errorf("guardian_memory observation stable_window_seconds cannot be negative")
 	}
 	return nil
 }
@@ -111,8 +125,12 @@ func NormalizeGuardianMemorySpec(spec model.GuardianMemoryManifestSpec) model.Gu
 	spec.Execution.CompletedAt = strings.TrimSpace(spec.Execution.CompletedAt)
 	spec.Execution.Error = strings.TrimSpace(spec.Execution.Error)
 	spec.Observation.ObservedAt = strings.TrimSpace(spec.Observation.ObservedAt)
+	spec.Observation.LastObservedAt = strings.TrimSpace(spec.Observation.LastObservedAt)
 	spec.Observation.Summary = strings.TrimSpace(spec.Observation.Summary)
 	spec.Observation.ComponentHealth = strings.ToLower(strings.TrimSpace(spec.Observation.ComponentHealth))
+	if spec.Observation.ObservationCount == 0 && spec.Observation.ObservedAt != "" {
+		spec.Observation.ObservationCount = 1
+	}
 	return spec
 }
 

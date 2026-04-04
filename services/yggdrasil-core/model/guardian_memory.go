@@ -24,10 +24,14 @@ type GuardianMemoryExecutionSpec struct {
 // GuardianMemoryObservationSpec captures the later observed outcome after one
 // action has been executed.
 type GuardianMemoryObservationSpec struct {
-	ObservedAt     string `json:"observed_at,omitempty"`
-	Summary        string `json:"summary,omitempty"`
-	ComponentHealth string `json:"component_health,omitempty"`
-	IncidentCount  int    `json:"incident_count,omitempty"`
+	ObservedAt             string `json:"observed_at,omitempty"`
+	LastObservedAt         string `json:"last_observed_at,omitempty"`
+	Summary                string `json:"summary,omitempty"`
+	ComponentHealth        string `json:"component_health,omitempty"`
+	IncidentCount          int    `json:"incident_count,omitempty"`
+	ObservationCount       int    `json:"observation_count,omitempty"`
+	TimeToRecoverySeconds  int    `json:"time_to_recovery_seconds,omitempty"`
+	StableWindowSeconds    int    `json:"stable_window_seconds,omitempty"`
 }
 
 // GuardianMemoryManifestSpec stores one operational memory entry emitted by

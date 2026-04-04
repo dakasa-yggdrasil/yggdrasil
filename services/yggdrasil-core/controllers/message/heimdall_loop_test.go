@@ -3,6 +3,7 @@ package message
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dakasa-co/yggdrasil-core/model"
 )
@@ -165,5 +166,49 @@ func TestHeimdallBuildWorkflowInputsIncludesRemediationFields(t *testing.T) {
 	}
 	if got := anyString(inputs["event_name"]); got != "critical_auto_remediation" {
 		t.Fatalf("event_name = %q, want critical_auto_remediation", got)
+	}
+}
+
+func TestHeimdallEvaluateMemoryObservationTracksRecoveryTimingAndStability(t *testing.T) {
+	now := time.Now().UTC()
+	spec := model.GuardianMemoryManifestSpec{
+		Status:             model.GuardianMemoryStatusObservedRecovered,
+		ComponentKind:      "integration",
+		ComponentNamespace: "global",
+		ComponentName:      "heimdall-guardian",
+		Execution: model.GuardianMemoryExecutionSpec{
+			AttemptedAt: now.Add(-26 * time.Hour).Format(time.RFC3339),
+			CompletedAt: now.Add(-25 * time.Hour).Format(time.RFC3339),
+		},
+		Observation: model.GuardianMemoryObservationSpec{
+			ObservedAt:       now.Add(-24 * time.Hour).Format(time.RFC3339),
+			ObservationCount: 1,
+		},
+	}
+
+	status, observation, ok := heimdallEvaluateMemoryObservation(map[string]any{
+		"integrations": []map[string]any{
+			{
+				"name":           "heimdall-guardian",
+				"namespace":      "global",
+				"overall_health": "healthy",
+			},
+		},
+		"incidents": []map[string]any{},
+	}, spec)
+	if !ok {
+		t.Fatal("expected observation to be evaluated")
+	}
+	if status != model.GuardianMemoryStatusObservedRecovered {
+		t.Fatalf("status = %q, want observed_recovered", status)
+	}
+	if observation.TimeToRecoverySeconds <= 0 {
+		t.Fatalf("time_to_recovery_seconds = %d, want > 0", observation.TimeToRecoverySeconds)
+	}
+	if observation.StableWindowSeconds < 24*60*60-60 {
+		t.Fatalf("stable_window_seconds = %d, want roughly >= 24h", observation.StableWindowSeconds)
+	}
+	if observation.ObservationCount < 2 {
+		t.Fatalf("observation_count = %d, want incremented count", observation.ObservationCount)
 	}
 }

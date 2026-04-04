@@ -2079,7 +2079,7 @@ func observeHeimdallGuardianMemories(
 	memories []heimdallGuardianMemory,
 ) error {
 	for _, memory := range memories {
-		if memory.Spec.Status != model.GuardianMemoryStatusExecuted {
+		if !heimdallMemoryNeedsObservation(memory.Spec.Status) {
 			continue
 		}
 		nextStatus, observation, ok := heimdallEvaluateMemoryObservation(snapshot, memory.Spec)
@@ -2093,6 +2093,17 @@ func observeHeimdallGuardianMemories(
 		}
 	}
 	return nil
+}
+
+func heimdallMemoryNeedsObservation(status string) bool {
+	switch strings.TrimSpace(status) {
+	case model.GuardianMemoryStatusExecuted,
+		model.GuardianMemoryStatusObservedRecovered,
+		model.GuardianMemoryStatusObservedUnchanged:
+		return true
+	default:
+		return false
+	}
 }
 
 func heimdallEvaluateMemoryObservation(
@@ -2113,18 +2124,45 @@ func heimdallEvaluateMemoryObservation(
 		}
 	}
 
-	observation := model.GuardianMemoryObservationSpec{
-		ObservedAt:      time.Now().UTC().Format(time.RFC3339),
-		ComponentHealth: health,
-		IncidentCount:   len(incidents),
+	now := time.Now().UTC()
+	observation := spec.Observation
+	if observation.ObservedAt == "" {
+		observation.ObservedAt = now.Format(time.RFC3339)
 	}
+	observation.LastObservedAt = now.Format(time.RFC3339)
+	observation.ComponentHealth = health
+	observation.IncidentCount = len(incidents)
+	observation.ObservationCount++
+	if observation.ObservationCount <= 0 {
+		observation.ObservationCount = 1
+	}
+	if observation.TimeToRecoverySeconds == 0 {
+		if completedAt, ok := heimdallParseRFC3339(spec.Execution.CompletedAt); ok {
+			observation.TimeToRecoverySeconds = heimdallMaxInt(0, int(now.Sub(completedAt).Seconds()))
+		} else if attemptedAt, ok := heimdallParseRFC3339(spec.Execution.AttemptedAt); ok {
+			observation.TimeToRecoverySeconds = heimdallMaxInt(0, int(now.Sub(attemptedAt).Seconds()))
+		}
+	}
+	if observedAt, ok := heimdallParseRFC3339(observation.ObservedAt); ok {
+		observation.StableWindowSeconds = heimdallMaxInt(0, int(now.Sub(observedAt).Seconds()))
+	}
+	componentHealthy := criticalIncidents == 0 && !containsAnyString(health, "unreachable", "invalid_response", "contract_mismatch", "degraded", "failed", "disabled")
 
 	switch {
 	case len(component) == 0:
 		observation.Summary = "The component was not found in the latest ecosystem snapshot."
 		return model.GuardianMemoryStatusObservedUnchanged, observation, true
-	case criticalIncidents == 0 && !containsAnyString(health, "unreachable", "invalid_response", "contract_mismatch", "degraded", "failed", "disabled"):
-		observation.Summary = "The component looks healthy after the action."
+	case componentHealthy:
+		if observation.TimeToRecoverySeconds == 0 {
+			observation.TimeToRecoverySeconds = 1
+		}
+		if observation.StableWindowSeconds >= 24*60*60 {
+			observation.Summary = "The component recovered and has stayed healthy for at least 24 hours."
+		} else if observation.StableWindowSeconds >= 60*60 {
+			observation.Summary = "The component recovered and has remained healthy for a meaningful stability window."
+		} else {
+			observation.Summary = "The component looks healthy after the action."
+		}
 		return model.GuardianMemoryStatusObservedRecovered, observation, true
 	case criticalIncidents > 0 || containsAnyString(health, "unreachable", "invalid_response", "contract_mismatch"):
 		observation.Summary = "The component still looks unhealthy after the action."
@@ -2133,6 +2171,21 @@ func heimdallEvaluateMemoryObservation(
 		observation.Summary = "The component changed, but the issue was not clearly resolved."
 		return model.GuardianMemoryStatusObservedUnchanged, observation, true
 	}
+}
+
+func heimdallParseRFC3339(value string) (time.Time, bool) {
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(value))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed, true
+}
+
+func heimdallMaxInt(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func heimdallSnapshotComponent(snapshot map[string]any, componentKind, componentNamespace, componentName string) map[string]any {
@@ -2206,10 +2259,14 @@ func heimdallGuardianMemoryItems(memories []heimdallGuardianMemory) []map[string
 				"error":        memory.Spec.Execution.Error,
 			},
 			"observation": map[string]any{
-				"observed_at":      memory.Spec.Observation.ObservedAt,
-				"summary":          memory.Spec.Observation.Summary,
-				"component_health": memory.Spec.Observation.ComponentHealth,
-				"incident_count":   memory.Spec.Observation.IncidentCount,
+				"observed_at":              memory.Spec.Observation.ObservedAt,
+				"last_observed_at":         memory.Spec.Observation.LastObservedAt,
+				"summary":                  memory.Spec.Observation.Summary,
+				"component_health":         memory.Spec.Observation.ComponentHealth,
+				"incident_count":           memory.Spec.Observation.IncidentCount,
+				"observation_count":        memory.Spec.Observation.ObservationCount,
+				"time_to_recovery_seconds": memory.Spec.Observation.TimeToRecoverySeconds,
+				"stable_window_seconds":    memory.Spec.Observation.StableWindowSeconds,
 			},
 			"created_at": memory.Manifest.CreatedAt.UTC().Format(time.RFC3339),
 			"updated_at": memory.Manifest.UpdatedAt.UTC().Format(time.RFC3339),
