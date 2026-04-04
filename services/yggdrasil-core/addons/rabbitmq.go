@@ -54,6 +54,13 @@ func bootstrapRabbitMQ(ctx context.Context, app *runtime.ServiceApp) error {
 		return nil
 	})
 
+	guardianInterval := heimdallGuardianLoopInterval()
+	stopGuardian := message.StartHeimdallGuardianLoop(conn, db, logger, guardianInterval)
+	app.RegisterCloser(func(context.Context) error {
+		stopGuardian()
+		return nil
+	})
+
 	return nil
 }
 
@@ -77,6 +84,20 @@ func integrationRuntimeMonitorInterval() time.Duration {
 	seconds, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || seconds <= 0 {
 		return 60 * time.Second
+	}
+
+	return time.Duration(seconds) * time.Second
+}
+
+func heimdallGuardianLoopInterval() time.Duration {
+	raw := os.Getenv("HEIMDALL_GUARDIAN_LOOP_INTERVAL_SECONDS")
+	if raw == "" {
+		return 120 * time.Second
+	}
+
+	seconds, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || seconds <= 0 {
+		return 120 * time.Second
 	}
 
 	return time.Duration(seconds) * time.Second

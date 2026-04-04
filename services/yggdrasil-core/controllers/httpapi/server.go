@@ -164,6 +164,10 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/secrets/{namespace}/{name}/rotate", server.handleManagedSecretRotate)
 	mux.HandleFunc("POST /api/v1/secrets/{namespace}/{name}/disable", server.handleManagedSecretDisable)
 	mux.HandleFunc("POST /api/v1/secrets/{namespace}/{name}/revoke", server.handleManagedSecretRevoke)
+	mux.HandleFunc("GET /api/v1/repository-bindings", server.handleRepositoryBindingList)
+	mux.HandleFunc("POST /api/v1/repository-bindings", server.handleRepositoryBindingCreate)
+	mux.HandleFunc("GET /api/v1/guardian-policies", server.handleGuardianPolicyList)
+	mux.HandleFunc("POST /api/v1/guardian-policies", server.handleGuardianPolicyCreate)
 	mux.HandleFunc("GET /api/v1/surfaces", server.handleSurfaceList)
 	mux.HandleFunc("POST /api/v1/surfaces", server.handleSurfaceCreate)
 	mux.HandleFunc("GET /api/v1/workflows", server.handleWorkflowList)
@@ -196,6 +200,10 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/console/secrets/{namespace}/{name}/rotate", server.handleManagedSecretRotate)
 	mux.HandleFunc("POST /api/v1/console/secrets/{namespace}/{name}/disable", server.handleManagedSecretDisable)
 	mux.HandleFunc("POST /api/v1/console/secrets/{namespace}/{name}/revoke", server.handleManagedSecretRevoke)
+	mux.HandleFunc("GET /api/v1/console/repository-bindings", server.handleRepositoryBindingList)
+	mux.HandleFunc("POST /api/v1/console/repository-bindings", server.handleRepositoryBindingCreate)
+	mux.HandleFunc("GET /api/v1/console/guardian-policies", server.handleGuardianPolicyList)
+	mux.HandleFunc("POST /api/v1/console/guardian-policies", server.handleGuardianPolicyCreate)
 	mux.HandleFunc("GET /api/v1/console/surfaces", server.handleSurfaceList)
 	mux.HandleFunc("POST /api/v1/console/surfaces", server.handleSurfaceCreate)
 	mux.HandleFunc("GET /api/v1/console/workflows", server.handleWorkflowList)
@@ -620,6 +628,22 @@ func (s *Server) handleProductCreate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSurfaceList(w http.ResponseWriter, r *http.Request) {
 	s.handleManifestList(w, r, "surface")
+}
+
+func (s *Server) handleRepositoryBindingList(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestList(w, r, "repository_binding")
+}
+
+func (s *Server) handleRepositoryBindingCreate(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestCreate(w, r, "repository_binding")
+}
+
+func (s *Server) handleGuardianPolicyList(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestList(w, r, "guardian_policy")
+}
+
+func (s *Server) handleGuardianPolicyCreate(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestCreate(w, r, "guardian_policy")
 }
 
 func (s *Server) handleSurfaceCreate(w http.ResponseWriter, r *http.Request) {

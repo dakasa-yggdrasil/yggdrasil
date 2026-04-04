@@ -1,6 +1,6 @@
 # yggdrasil-core
 
-`yggdrasil-core` is the central control plane for Yggdrasil. It owns the core database, serves the synchronous HTTP API used by reference surfaces, stores manifests, and evaluates the rules that drive internal and third-party authorization. The first supported manifest kinds are `rbac`, `policy`, `integration_type`, `integration_instance`, `resource`, `surface`, `product`, and `workflow`.
+`yggdrasil-core` is the central control plane for Yggdrasil. It owns the core database, serves the synchronous HTTP API used by reference surfaces, stores manifests, and evaluates the rules that drive internal and third-party authorization. The first supported manifest kinds are `rbac`, `policy`, `integration_type`, `integration_instance`, `resource`, `surface`, `repository_binding`, `guardian_policy`, `product`, and `workflow`.
 
 The current service foundation includes:
 
@@ -20,9 +20,12 @@ The current service foundation includes:
 - integration_instance manifest parsing and validation
 - resource manifest parsing and validation
 - surface manifest parsing and validation
+- repository_binding manifest parsing and validation
+- guardian_policy manifest parsing and validation
 - product manifest parsing and validation
 - workflow manifest parsing, rendering, and execution
 - generic integration execution through configured integration instances
+- closed-loop Heimdall guardian sweeps backed by repository bindings and guardian policies
 - composed authorization evaluation across RBAC and policy
 - structured logging for worker execution
 - direct auth/session HTTP endpoints under `/api/v1/auth/...`
@@ -63,6 +66,8 @@ The first supported kinds are:
 - `integration_instance`
 - `resource`
 - `surface`
+- `repository_binding`
+- `guardian_policy`
 - `product`
 - `workflow`
 
@@ -121,6 +126,20 @@ The first supported kinds are:
 - explicit `integration_binding = core_only` to keep integrations owned by the core
 - user-facing capabilities such as endpoints, auth flows, and UI areas
 - `auth` as a first-class core contract when a surface fronts login/session behavior
+
+`repository_binding` has:
+
+- one ecosystem component to repository association
+- deploy workflow and default branch hints for bounded automation
+- explicit repository automation permissions such as workflow dispatch vs pull request automation
+- optional metadata used by guardians and future repo-aware workflows
+
+`guardian_policy` has:
+
+- one guardian instance selector
+- auto-heal severity threshold, cooldown, and max-action limits
+- explicit allow/deny gates for workflow dispatch, secret rotation, and right-sizing
+- repository automation and cost-optimization boundaries
 
 `product` has:
 
@@ -201,6 +220,8 @@ Additional direct core endpoints now include:
 - `/api/v1/secrets/{namespace}/{name}/disable`
 - `/api/v1/secrets/{namespace}/{name}/revoke`
 - `/api/v1/products`
+- `/api/v1/repository-bindings`
+- `/api/v1/guardian-policies`
 - `/api/v1/surfaces`
 - `/api/v1/workflows`
 - `/api/v1/workflow-runs`
@@ -214,6 +235,11 @@ send either:
 
 - `X-Yggdrasil-Workflow-Token: <token>`
 - `Authorization: Bearer <token>`
+
+When RabbitMQ is enabled, the core also starts the periodic Heimdall guardian
+loop. The interval is controlled by:
+
+- `HEIMDALL_GUARDIAN_LOOP_INTERVAL_SECONDS`
 
 The intended split is:
 

@@ -96,6 +96,18 @@ func ValidateDocument(doc model.ManifestDocument) error {
 			return err
 		}
 		return ValidateSurfaceSpec(spec)
+	case "repository_binding":
+		spec, err := ParseRepositoryBindingSpec(doc.Spec)
+		if err != nil {
+			return err
+		}
+		return ValidateRepositoryBindingSpec(spec)
+	case "guardian_policy":
+		spec, err := ParseGuardianPolicySpec(doc.Spec)
+		if err != nil {
+			return err
+		}
+		return ValidateGuardianPolicySpec(spec)
 	case "product":
 		spec, err := ParseProductSpec(doc.Spec)
 		if err != nil {

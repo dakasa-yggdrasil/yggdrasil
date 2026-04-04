@@ -23,7 +23,7 @@
     "config": {
       "guardian_name": "Heimdall",
       "observation_scope": "global",
-      "critical_auto_remediation_enabled": false,
+      "critical_auto_remediation_enabled": true,
       "recommendation_limit": 10,
       "default_owner_team": "team:platform",
       "default_repository_owner": "dakasa-yggdrasil",

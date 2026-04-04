@@ -1,0 +1,38 @@
+{
+  "apiVersion": "yggdrasil.io/v1alpha1",
+  "kind": "guardian_policy",
+  "metadata": {
+    "name": "heimdall-default",
+    "namespace": "global",
+    "description": "Default autonomy policy for the Heimdall guardian loop running inside the core.",
+    "labels": {
+      "bootstrap_source": "yggdrasil-core",
+      "guardian": "heimdall"
+    }
+  },
+  "spec": {
+    "guardian_ref": {
+      "namespace": "global",
+      "name": "heimdall-guardian"
+    },
+    "scope": "global",
+    "auto_heal": {
+      "enabled": true,
+      "severity_threshold": "critical",
+      "max_actions_per_sweep": 1,
+      "cooldown_seconds": 300,
+      "allow_dispatch_workflow": true,
+      "allow_rotate_secret": false,
+      "allow_rightsize": false
+    },
+    "repository_automation": {
+      "allow_pull_request_automation": false,
+      "allow_direct_push": false
+    },
+    "cost_optimization": {
+      "enabled": true,
+      "min_estimated_monthly_savings_usd": 100,
+      "allow_rightsize": false
+    }
+  }
+}
