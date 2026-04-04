@@ -37,6 +37,15 @@ func ValidateGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) error {
 	if !slices.Contains(supportedGuardianSeverityThresholds, spec.Autonomy.HotfixSeverityThreshold) {
 		return fmt.Errorf("guardian_policy autonomy hotfix_severity_threshold %q is unsupported", spec.Autonomy.HotfixSeverityThreshold)
 	}
+	if spec.Autonomy.AutoExecuteMinConfidence < 0 || spec.Autonomy.AutoExecuteMinConfidence > 1 {
+		return fmt.Errorf("guardian_policy autonomy auto_execute_min_confidence must be between 0 and 1")
+	}
+	if spec.Autonomy.ManualReviewBelowConfidence < 0 || spec.Autonomy.ManualReviewBelowConfidence > 1 {
+		return fmt.Errorf("guardian_policy autonomy manual_review_below_confidence must be between 0 and 1")
+	}
+	if spec.Autonomy.ManualReviewBelowConfidence > spec.Autonomy.AutoExecuteMinConfidence {
+		return fmt.Errorf("guardian_policy autonomy manual_review_below_confidence must be <= auto_execute_min_confidence")
+	}
 	if spec.AutoHeal.MaxActionsPerSweep < 0 {
 		return fmt.Errorf("guardian_policy auto_heal max_actions_per_sweep must be >= 0")
 	}
@@ -77,6 +86,18 @@ func NormalizeGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) model.Gu
 	spec.Autonomy.HotfixSeverityThreshold = strings.ToLower(strings.TrimSpace(spec.Autonomy.HotfixSeverityThreshold))
 	if spec.Autonomy.HotfixSeverityThreshold == "" {
 		spec.Autonomy.HotfixSeverityThreshold = "critical"
+	}
+	if spec.Autonomy.AutoExecuteMinConfidence <= 0 {
+		spec.Autonomy.AutoExecuteMinConfidence = 0.7
+	}
+	if spec.Autonomy.ManualReviewBelowConfidence < 0 {
+		spec.Autonomy.ManualReviewBelowConfidence = 0
+	}
+	if spec.Autonomy.ManualReviewBelowConfidence == 0 {
+		spec.Autonomy.ManualReviewBelowConfidence = 0.25
+	}
+	if spec.Autonomy.ManualReviewBelowConfidence > spec.Autonomy.AutoExecuteMinConfidence {
+		spec.Autonomy.ManualReviewBelowConfidence = spec.Autonomy.AutoExecuteMinConfidence
 	}
 
 	if spec.CostOptimization.MinEstimatedMonthlySavingsUSD < 0 {

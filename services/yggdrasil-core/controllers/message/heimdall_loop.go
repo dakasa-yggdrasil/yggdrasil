@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -53,6 +54,32 @@ type heimdallExecutionOptions struct {
 	SkipCooldown bool
 	MemoryName   string
 	MemoryNS     string
+	Decision     *heimdallAutonomyDecision
+}
+
+type heimdallActionConfidenceAssessment struct {
+	Confidence               float64
+	Attempts                 float64
+	RecoveryRate             float64
+	AvgTimeToRecoverySeconds float64
+	AvgStableWindowSeconds   float64
+	ComponentScope           string
+	ProviderGroup            string
+	IncidentCategory         string
+	ConfidenceBand           string
+}
+
+type heimdallAutonomyDecision struct {
+	Mode             string
+	RequireApproval  bool
+	ManualReview     bool
+	Confidence       float64
+	ConfidenceBand   string
+	Reason           string
+	ProviderGroup    string
+	IncidentCategory string
+	Attempts         float64
+	RecoveryRate     float64
 }
 
 // StartHeimdallGuardianLoop runs the periodic closed-loop guardian sweep.
@@ -917,8 +944,18 @@ func executeHeimdallActionWithOptions(
 	source string,
 	options heimdallExecutionOptions,
 ) error {
-	if !options.SkipApproval && heimdallShouldRequestApproval(policy, source) {
-		return createHeimdallApprovalRequest(ctx, db, action, policy, source)
+	decision := options.Decision
+	if decision == nil {
+		resolved, err := heimdallResolveAutonomyDecision(ctx, db, action, policy, source)
+		if err != nil {
+			return err
+		}
+		decision = &resolved
+		options.Decision = decision
+	}
+
+	if !options.SkipApproval && decision.RequireApproval {
+		return createHeimdallApprovalRequest(ctx, db, action, policy, source, *decision)
 	}
 
 	memory, err := ensureHeimdallExecutionMemory(ctx, db, action, policy, source, options)
@@ -1012,14 +1049,73 @@ func ExecuteHeimdallApprovedAction(
 	)
 }
 
-func heimdallShouldRequestApproval(policy model.GuardianPolicyManifestSpec, source string) bool {
-	switch policy.Autonomy.Mode {
-	case "approval_required":
-		return true
-	case "bypass_hotfix":
-		return source != "critical_auto_remediation"
+func heimdallResolveAutonomyDecision(
+	ctx context.Context,
+	db *sql.DB,
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+) (heimdallAutonomyDecision, error) {
+	assessment, err := heimdallAssessActionConfidence(ctx, db, action)
+	if err != nil {
+		return heimdallAutonomyDecision{}, err
+	}
+	return heimdallDecisionFromAssessment(action, policy, source, assessment), nil
+}
+
+func heimdallDecisionFromAssessment(
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+	assessment heimdallActionConfidenceAssessment,
+) heimdallAutonomyDecision {
+	decision := heimdallAutonomyDecision{
+		Mode:             policy.Autonomy.Mode,
+		Confidence:       assessment.Confidence,
+		ConfidenceBand:   heimdallConfidenceBand(policy, assessment.Confidence),
+		ProviderGroup:    assessment.ProviderGroup,
+		IncidentCategory: assessment.IncidentCategory,
+		Attempts:         assessment.Attempts,
+		RecoveryRate:     assessment.RecoveryRate,
+	}
+
+	if policy.Autonomy.Mode == "approval_required" {
+		decision.RequireApproval = true
+		decision.ManualReview = assessment.Confidence <= policy.Autonomy.ManualReviewBelowConfidence
+		decision.Reason = "guardian policy requires approval for every action"
+		return decision
+	}
+
+	if policy.Autonomy.Mode == "bypass_hotfix" && source == "critical_auto_remediation" &&
+		heimdallSeverityMeetsThreshold(firstNonEmpty(anyString(heimdallIncidentFromAction(action)["severity"]), "critical"), policy.Autonomy.HotfixSeverityThreshold) {
+		decision.ConfidenceBand = "bypass_hotfix"
+		decision.Reason = "guardian policy allows emergency bypass for this hotfix severity"
+		return decision
+	}
+
+	if assessment.Confidence >= policy.Autonomy.AutoExecuteMinConfidence {
+		decision.Reason = "historical memory shows this playbook is safe enough to auto-execute"
+		return decision
+	}
+
+	decision.RequireApproval = true
+	if assessment.Confidence <= policy.Autonomy.ManualReviewBelowConfidence {
+		decision.ManualReview = true
+		decision.Reason = "historical confidence is low and requires manual review"
+	} else {
+		decision.Reason = "historical confidence is moderate, so approval is required before execution"
+	}
+	return decision
+}
+
+func heimdallConfidenceBand(policy model.GuardianPolicyManifestSpec, confidence float64) string {
+	switch {
+	case confidence >= policy.Autonomy.AutoExecuteMinConfidence:
+		return "trusted"
+	case confidence <= policy.Autonomy.ManualReviewBelowConfidence:
+		return "manual_review"
 	default:
-		return false
+		return "approval"
 	}
 }
 
@@ -1029,6 +1125,7 @@ func createHeimdallApprovalRequest(
 	action map[string]any,
 	policy model.GuardianPolicyManifestSpec,
 	source string,
+	decision heimdallAutonomyDecision,
 ) error {
 	if db == nil {
 		return fmt.Errorf("database connection is required to persist guardian approvals")
@@ -1047,6 +1144,12 @@ func createHeimdallApprovalRequest(
 		anyString(action["description"]),
 		fmt.Sprintf("Approval required for %s on %s/%s", actionType, componentNamespace, componentName),
 	)
+	if decision.Confidence > 0 {
+		summary = fmt.Sprintf("%s (confidence %.0f%%, %s)", summary, decision.Confidence*100, firstNonEmpty(decision.ConfidenceBand, "review"))
+	}
+	if decision.ManualReview {
+		summary = fmt.Sprintf("%s Manual review recommended.", summary)
+	}
 
 	spec := manifestengine.NormalizeGuardianApprovalSpec(model.GuardianApprovalManifestSpec{
 		GuardianRef: policy.GuardianRef,
@@ -1056,12 +1159,20 @@ func createHeimdallApprovalRequest(
 		Action:      cloneAuthorizationInput(action),
 		Incident:    heimdallIncidentFromAction(action),
 		Metadata: map[string]any{
-			"autonomy_mode": policy.Autonomy.Mode,
-			"requested_at":  time.Now().UTC().Format(time.RFC3339),
+			"autonomy_mode":     policy.Autonomy.Mode,
+			"requested_at":      time.Now().UTC().Format(time.RFC3339),
+			"confidence":        round2(decision.Confidence),
+			"confidence_band":   decision.ConfidenceBand,
+			"confidence_reason": decision.Reason,
+			"manual_review":     decision.ManualReview,
+			"provider_group":    decision.ProviderGroup,
+			"incident_category": decision.IncidentCategory,
+			"attempts":          round2(decision.Attempts),
+			"recovery_rate":     round2(decision.RecoveryRate),
 		},
 	})
 
-	memory, err := createHeimdallPendingApprovalMemory(ctx, db, action, policy, source)
+	memory, err := createHeimdallPendingApprovalMemory(ctx, db, action, policy, source, decision)
 	if err != nil {
 		return err
 	}
@@ -1826,6 +1937,276 @@ func heimdallActionLearningMetadata(
 	}
 }
 
+func heimdallDecisionMetadata(decision heimdallAutonomyDecision) map[string]any {
+	return map[string]any{
+		"confidence":        round2(decision.Confidence),
+		"confidence_band":   strings.TrimSpace(decision.ConfidenceBand),
+		"confidence_reason": strings.TrimSpace(decision.Reason),
+		"manual_review":     decision.ManualReview,
+		"provider_group":    strings.TrimSpace(decision.ProviderGroup),
+		"incident_category": strings.TrimSpace(decision.IncidentCategory),
+		"attempts":          round2(decision.Attempts),
+		"recovery_rate":     round2(decision.RecoveryRate),
+	}
+}
+
+func heimdallAssessActionConfidence(
+	ctx context.Context,
+	db *sql.DB,
+	action map[string]any,
+) (heimdallActionConfidenceAssessment, error) {
+	if db == nil {
+		return heimdallDefaultActionConfidence(action), nil
+	}
+	memories, err := loadHeimdallGuardianMemories(ctx, db)
+	if err != nil {
+		return heimdallActionConfidenceAssessment{}, err
+	}
+	return heimdallAssessActionConfidenceFromMemories(action, memories), nil
+}
+
+func heimdallAssessActionConfidenceFromMemories(
+	action map[string]any,
+	memories []heimdallGuardianMemory,
+) heimdallActionConfidenceAssessment {
+	incident := heimdallIncidentFromAction(action)
+	evidence := heimdallActionEvidence(action)
+	current := heimdallActionLearningMetadata(action, incident, evidence)
+	actionType := anyString(current["action_type"])
+	providerGroup := anyString(current["provider_group"])
+	incidentCategory := anyString(current["incident_category"])
+
+	if actionType == "" {
+		return heimdallDefaultActionConfidence(action)
+	}
+
+	recovered := 0.0
+	unchanged := 0.0
+	failed := 0.0
+	totalWeight := 0.0
+	recoveryTimingWeight := 0.0
+	avgTimeToRecovery := 0.0
+	avgStableWindow := 0.0
+	bestScope := ""
+
+	for _, memory := range memories {
+		if !heimdallMemoryCanInformConfidence(memory.Spec.Status) {
+			continue
+		}
+		memoryActionType := strings.TrimSpace(anyString(memory.Spec.Action["type"]))
+		if !strings.EqualFold(memoryActionType, actionType) {
+			continue
+		}
+		weight, scope := heimdallMemoryMatchWeight(current, memory)
+		if weight <= 0 {
+			continue
+		}
+		totalWeight += weight
+		if heimdallScopeRank(scope) > heimdallScopeRank(bestScope) {
+			bestScope = scope
+		}
+
+		switch strings.TrimSpace(memory.Spec.Status) {
+		case model.GuardianMemoryStatusObservedRecovered:
+			recovered += weight
+			speed := heimdallObservationSpeedScore(memory.Spec.Observation.TimeToRecoverySeconds)
+			stability := heimdallObservationStabilityScore(memory.Spec.Observation.StableWindowSeconds)
+			avgTimeToRecovery = heimdallWeightedAverage(avgTimeToRecovery, float64(memory.Spec.Observation.TimeToRecoverySeconds), recoveryTimingWeight, weight)
+			avgStableWindow = heimdallWeightedAverage(avgStableWindow, float64(memory.Spec.Observation.StableWindowSeconds), recoveryTimingWeight, weight)
+			recoveryTimingWeight += weight
+			recovered += weight * (0.35*speed + 0.45*stability)
+		case model.GuardianMemoryStatusObservedUnchanged:
+			unchanged += weight * heimdallObservationUnchangedPenalty(memory.Spec.Observation)
+		case model.GuardianMemoryStatusExecutionFailed, model.GuardianMemoryStatusObservedRegressed:
+			failed += weight * heimdallObservationFailurePenalty(memory.Spec)
+		}
+	}
+
+	if totalWeight == 0 {
+		return heimdallDefaultActionConfidence(action)
+	}
+
+	recoveryRate := recovered / (recovered + unchanged + failed)
+	stabilityScore := heimdallObservationStabilityScore(int(avgStableWindow))
+	speedScore := heimdallObservationSpeedScore(int(avgTimeToRecovery))
+	sampleScore := heimdallMinFloat(1, totalWeight/3)
+	confidence := 0.45*recoveryRate + 0.25*stabilityScore + 0.15*speedScore + 0.15*sampleScore
+	if confidence < 0 {
+		confidence = 0
+	}
+	if confidence > 1 {
+		confidence = 1
+	}
+
+	return heimdallActionConfidenceAssessment{
+		Confidence:               confidence,
+		Attempts:                 totalWeight,
+		RecoveryRate:             recoveryRate,
+		AvgTimeToRecoverySeconds: avgTimeToRecovery,
+		AvgStableWindowSeconds:   avgStableWindow,
+		ComponentScope:           bestScope,
+		ProviderGroup:            providerGroup,
+		IncidentCategory:         incidentCategory,
+	}
+}
+
+func heimdallDefaultActionConfidence(action map[string]any) heimdallActionConfidenceAssessment {
+	incident := heimdallIncidentFromAction(action)
+	evidence := heimdallActionEvidence(action)
+	current := heimdallActionLearningMetadata(action, incident, evidence)
+	return heimdallActionConfidenceAssessment{
+		Confidence:       0.3,
+		Attempts:         0,
+		RecoveryRate:     0,
+		ComponentScope:   "unknown",
+		ProviderGroup:    anyString(current["provider_group"]),
+		IncidentCategory: anyString(current["incident_category"]),
+	}
+}
+
+func heimdallMemoryCanInformConfidence(status string) bool {
+	switch strings.TrimSpace(status) {
+	case model.GuardianMemoryStatusObservedRecovered,
+		model.GuardianMemoryStatusObservedUnchanged,
+		model.GuardianMemoryStatusExecutionFailed,
+		model.GuardianMemoryStatusObservedRegressed:
+		return true
+	default:
+		return false
+	}
+}
+
+func heimdallMemoryMatchWeight(
+	current map[string]any,
+	memory heimdallGuardianMemory,
+) (float64, string) {
+	memoryComponentKey := strings.TrimSpace(anyString(memory.Spec.Metadata["component_key"]))
+	memoryProviderKey := strings.TrimSpace(anyString(memory.Spec.Metadata["provider_key"]))
+	memoryProviderGroup := strings.TrimSpace(anyString(memory.Spec.Metadata["provider_group"]))
+	memoryIncidentCategory := strings.TrimSpace(anyString(memory.Spec.Metadata["incident_category"]))
+
+	currentComponentKey := strings.TrimSpace(anyString(current["component_key"]))
+	currentProviderKey := strings.TrimSpace(anyString(current["provider_key"]))
+	currentProviderGroup := strings.TrimSpace(anyString(current["provider_group"]))
+	currentIncidentCategory := strings.TrimSpace(anyString(current["incident_category"]))
+	currentComponentKind := strings.TrimSpace(anyString(current["component_kind"]))
+
+	switch {
+	case memoryComponentKey != "" && strings.EqualFold(memoryComponentKey, currentComponentKey) &&
+		strings.EqualFold(memoryIncidentCategory, currentIncidentCategory):
+		return 1.0, "component"
+	case memoryProviderKey != "" && strings.EqualFold(memoryProviderKey, currentProviderKey) &&
+		strings.EqualFold(memoryIncidentCategory, currentIncidentCategory):
+		return 0.75, "provider"
+	case memoryProviderGroup != "" && strings.EqualFold(memoryProviderGroup, currentProviderGroup) &&
+		strings.EqualFold(memoryIncidentCategory, currentIncidentCategory):
+		return 0.6, "provider_group"
+	case strings.EqualFold(memoryIncidentCategory, currentIncidentCategory) &&
+		strings.EqualFold(memory.Spec.ComponentKind, currentComponentKind):
+		return 0.35, "incident_category"
+	case memoryProviderGroup != "" && strings.EqualFold(memoryProviderGroup, currentProviderGroup):
+		return 0.2, "provider_group"
+	case strings.EqualFold(memory.Spec.ComponentKind, currentComponentKind):
+		return 0.1, "component_kind"
+	default:
+		return 0, ""
+	}
+}
+
+func heimdallScopeRank(scope string) int {
+	switch strings.TrimSpace(scope) {
+	case "component":
+		return 5
+	case "provider":
+		return 4
+	case "provider_group":
+		return 3
+	case "incident_category":
+		return 2
+	case "component_kind":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func heimdallObservationSpeedScore(seconds int) float64 {
+	switch {
+	case seconds <= 0:
+		return 0.6
+	case seconds <= 5*60:
+		return 1
+	case seconds <= 30*60:
+		return 0.85
+	case seconds <= 2*60*60:
+		return 0.65
+	case seconds <= 24*60*60:
+		return 0.35
+	default:
+		return 0.15
+	}
+}
+
+func heimdallObservationStabilityScore(seconds int) float64 {
+	switch {
+	case seconds >= 24*60*60:
+		return 1
+	case seconds >= 6*60*60:
+		return 0.8
+	case seconds >= 60*60:
+		return 0.6
+	case seconds >= 10*60:
+		return 0.35
+	case seconds > 0:
+		return 0.15
+	default:
+		return 0.05
+	}
+}
+
+func heimdallObservationUnchangedPenalty(observation model.GuardianMemoryObservationSpec) float64 {
+	penalty := 1.0
+	if observation.StableWindowSeconds >= 60*60 {
+		penalty += 0.35
+	}
+	if observation.ObservationCount > 1 {
+		penalty += heimdallMinFloat(0.3, float64(observation.ObservationCount-1)*0.05)
+	}
+	return penalty
+}
+
+func heimdallObservationFailurePenalty(spec model.GuardianMemoryManifestSpec) float64 {
+	penalty := 1.3
+	if strings.TrimSpace(spec.Execution.Error) != "" {
+		penalty += 0.4
+	}
+	if spec.Observation.StableWindowSeconds > 0 && spec.Observation.StableWindowSeconds < 10*60 {
+		penalty += 0.3
+	}
+	return penalty
+}
+
+func heimdallWeightedAverage(currentAverage, sample, currentWeight, newWeight float64) float64 {
+	if newWeight <= 0 {
+		return currentAverage
+	}
+	if currentWeight <= 0 {
+		return sample
+	}
+	return ((currentAverage * currentWeight) + (sample * newWeight)) / (currentWeight + newWeight)
+}
+
+func heimdallMinFloat(left, right float64) float64 {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func round2(value float64) float64 {
+	return math.Round(value*100) / 100
+}
+
 func heimdallActionProviderGroup(typeName, runtimeKind, repository, componentKind string) string {
 	switch {
 	case strings.TrimSpace(typeName) != "":
@@ -1846,6 +2227,7 @@ func createHeimdallPendingApprovalMemory(
 	action map[string]any,
 	policy model.GuardianPolicyManifestSpec,
 	source string,
+	decision heimdallAutonomyDecision,
 ) (heimdallGuardianMemory, error) {
 	now := time.Now().UTC()
 	actionType := firstNonEmpty(anyString(action["type"]), "action")
@@ -1869,6 +2251,7 @@ func createHeimdallPendingApprovalMemory(
 		},
 	})
 	spec.Metadata = mergeStringAnyMaps(spec.Metadata, heimdallActionLearningMetadata(spec.Action, spec.Incident, spec.Evidence))
+	spec.Metadata = mergeStringAnyMaps(spec.Metadata, heimdallDecisionMetadata(decision))
 
 	return createHeimdallGuardianMemory(ctx, db, normalizeHeimdallMemoryName(componentKind, componentName, actionType, now), spec)
 }
@@ -1898,6 +2281,9 @@ func ensureHeimdallExecutionMemory(
 		spec.Execution.CompletedAt = ""
 		spec.Execution.Error = ""
 		spec.Metadata["approval_executed"] = true
+		if options.Decision != nil {
+			spec.Metadata = mergeStringAnyMaps(spec.Metadata, heimdallDecisionMetadata(*options.Decision))
+		}
 		return updateHeimdallGuardianMemory(ctx, db, heimdallGuardianMemory{
 			Manifest: manifestRecord,
 			Spec:     spec,
@@ -1927,6 +2313,9 @@ func ensureHeimdallExecutionMemory(
 		},
 	})
 	spec.Metadata = mergeStringAnyMaps(spec.Metadata, heimdallActionLearningMetadata(spec.Action, spec.Incident, spec.Evidence))
+	if options.Decision != nil {
+		spec.Metadata = mergeStringAnyMaps(spec.Metadata, heimdallDecisionMetadata(*options.Decision))
+	}
 
 	return createHeimdallGuardianMemory(ctx, db, normalizeHeimdallMemoryName(componentKind, componentName, actionType, now), spec)
 }
@@ -2382,9 +2771,11 @@ func heimdallPolicyInput(policy model.GuardianPolicyManifestSpec) map[string]any
 			"allow_rightsize":                   policy.CostOptimization.AllowRightsize,
 		},
 		"autonomy": map[string]any{
-			"mode":               policy.Autonomy.Mode,
-			"allow_llm_fallback": policy.Autonomy.AllowLLMFallback,
-			"hotfix_severity":    policy.Autonomy.HotfixSeverityThreshold,
+			"mode":                           policy.Autonomy.Mode,
+			"allow_llm_fallback":             policy.Autonomy.AllowLLMFallback,
+			"hotfix_severity":                policy.Autonomy.HotfixSeverityThreshold,
+			"auto_execute_min_confidence":    policy.Autonomy.AutoExecuteMinConfidence,
+			"manual_review_below_confidence": policy.Autonomy.ManualReviewBelowConfidence,
 		},
 	}
 }

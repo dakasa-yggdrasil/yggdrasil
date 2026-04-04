@@ -212,3 +212,71 @@ func TestHeimdallEvaluateMemoryObservationTracksRecoveryTimingAndStability(t *te
 		t.Fatalf("observation_count = %d, want incremented count", observation.ObservationCount)
 	}
 }
+
+func TestHeimdallDecisionFromAssessmentAutoExecutesTrustedPlaybooks(t *testing.T) {
+	decision := heimdallDecisionFromAssessment(
+		map[string]any{
+			"type":              "dispatch_workflow",
+			"incident_severity": "critical",
+		},
+		model.GuardianPolicyManifestSpec{
+			Autonomy: model.GuardianAutonomyPolicySpec{
+				Mode:                        "policy_bound",
+				AutoExecuteMinConfidence:    0.7,
+				ManualReviewBelowConfidence: 0.25,
+				HotfixSeverityThreshold:     "critical",
+			},
+		},
+		"critical_auto_remediation",
+		heimdallActionConfidenceAssessment{
+			Confidence:       0.88,
+			ConfidenceBand:   "trusted",
+			ProviderGroup:    "kubernetes",
+			IncidentCategory: "capacity",
+			Attempts:         4,
+			RecoveryRate:     0.92,
+		},
+	)
+
+	if decision.RequireApproval {
+		t.Fatal("expected trusted playbook to auto-execute")
+	}
+	if decision.ConfidenceBand != "trusted" {
+		t.Fatalf("confidence band = %q, want trusted", decision.ConfidenceBand)
+	}
+}
+
+func TestHeimdallDecisionFromAssessmentRequiresManualReviewForLowConfidence(t *testing.T) {
+	decision := heimdallDecisionFromAssessment(
+		map[string]any{
+			"type":              "rightsize_component",
+			"incident_severity": "critical",
+		},
+		model.GuardianPolicyManifestSpec{
+			Autonomy: model.GuardianAutonomyPolicySpec{
+				Mode:                        "policy_bound",
+				AutoExecuteMinConfidence:    0.7,
+				ManualReviewBelowConfidence: 0.25,
+				HotfixSeverityThreshold:     "critical",
+			},
+		},
+		"critical_auto_remediation",
+		heimdallActionConfidenceAssessment{
+			Confidence:       0.12,
+			ProviderGroup:    "kubernetes",
+			IncidentCategory: "capacity",
+			Attempts:         1,
+			RecoveryRate:     0.1,
+		},
+	)
+
+	if !decision.RequireApproval {
+		t.Fatal("expected low-confidence playbook to require approval")
+	}
+	if !decision.ManualReview {
+		t.Fatal("expected low-confidence playbook to require manual review")
+	}
+	if decision.ConfidenceBand != "manual_review" {
+		t.Fatalf("confidence band = %q, want manual_review", decision.ConfidenceBand)
+	}
+}

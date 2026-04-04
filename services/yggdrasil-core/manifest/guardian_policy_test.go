@@ -63,5 +63,21 @@ func guardianPolicyFixture() model.GuardianPolicyManifestSpec {
 			Enabled:                       true,
 			MinEstimatedMonthlySavingsUSD: 50,
 		},
+		Autonomy: model.GuardianAutonomyPolicySpec{
+			Mode:                        "policy_bound",
+			AllowLLMFallback:            true,
+			HotfixSeverityThreshold:     "critical",
+			AutoExecuteMinConfidence:    0.7,
+			ManualReviewBelowConfidence: 0.25,
+		},
+	}
+}
+
+func TestValidateGuardianPolicySpecRejectsInvalidConfidenceThresholds(t *testing.T) {
+	spec := guardianPolicyFixture()
+	spec.Autonomy.AutoExecuteMinConfidence = 1.2
+
+	if err := ValidateGuardianPolicySpec(spec); err == nil {
+		t.Fatal("expected invalid auto_execute_min_confidence to fail validation")
 	}
 }

@@ -19,7 +19,9 @@
     "autonomy": {
       "mode": "policy_bound",
       "allow_llm_fallback": false,
-      "hotfix_severity_threshold": "critical"
+      "hotfix_severity_threshold": "critical",
+      "auto_execute_min_confidence": 0.7,
+      "manual_review_below_confidence": 0.25
     },
     "auto_heal": {
       "enabled": true,
