@@ -67,19 +67,23 @@ type heimdallActionConfidenceAssessment struct {
 	ProviderGroup            string
 	IncidentCategory         string
 	ConfidenceBand           string
+	BlastRadius              string
+	BlastRadiusReason        string
 }
 
 type heimdallAutonomyDecision struct {
-	Mode             string
-	RequireApproval  bool
-	ManualReview     bool
-	Confidence       float64
-	ConfidenceBand   string
-	Reason           string
-	ProviderGroup    string
-	IncidentCategory string
-	Attempts         float64
-	RecoveryRate     float64
+	Mode              string
+	RequireApproval   bool
+	ManualReview      bool
+	Confidence        float64
+	ConfidenceBand    string
+	Reason            string
+	ProviderGroup     string
+	IncidentCategory  string
+	Attempts          float64
+	RecoveryRate      float64
+	BlastRadius       string
+	BlastRadiusReason string
 }
 
 // StartHeimdallGuardianLoop runs the periodic closed-loop guardian sweep.
@@ -1069,32 +1073,73 @@ func heimdallDecisionFromAssessment(
 	source string,
 	assessment heimdallActionConfidenceAssessment,
 ) heimdallAutonomyDecision {
-	decision := heimdallAutonomyDecision{
-		Mode:             policy.Autonomy.Mode,
-		Confidence:       assessment.Confidence,
-		ConfidenceBand:   heimdallConfidenceBand(policy, assessment.Confidence),
-		ProviderGroup:    assessment.ProviderGroup,
-		IncidentCategory: assessment.IncidentCategory,
-		Attempts:         assessment.Attempts,
-		RecoveryRate:     assessment.RecoveryRate,
+	blastRadius, blastRadiusReason := heimdallResolveActionBlastRadius(action)
+	if strings.TrimSpace(assessment.BlastRadius) != "" {
+		blastRadius = assessment.BlastRadius
 	}
+	if strings.TrimSpace(assessment.BlastRadiusReason) != "" {
+		blastRadiusReason = assessment.BlastRadiusReason
+	}
+
+	decision := heimdallAutonomyDecision{
+		Mode:              policy.Autonomy.Mode,
+		Confidence:        assessment.Confidence,
+		ConfidenceBand:    heimdallConfidenceBand(policy, assessment.Confidence),
+		ProviderGroup:     assessment.ProviderGroup,
+		IncidentCategory:  assessment.IncidentCategory,
+		Attempts:          assessment.Attempts,
+		RecoveryRate:      assessment.RecoveryRate,
+		BlastRadius:       blastRadius,
+		BlastRadiusReason: blastRadiusReason,
+	}
+	autoExecuteAllowed := heimdallBlastRadiusWithinLimit(blastRadius, policy.Autonomy.MaxAutoExecuteBlastRadius)
+	hotfixBypassAllowed := heimdallBlastRadiusWithinLimit(blastRadius, policy.Autonomy.MaxBypassHotfixBlastRadius)
 
 	if policy.Autonomy.Mode == "approval_required" {
 		decision.RequireApproval = true
-		decision.ManualReview = assessment.Confidence <= policy.Autonomy.ManualReviewBelowConfidence
+		decision.ManualReview = assessment.Confidence <= policy.Autonomy.ManualReviewBelowConfidence || !hotfixBypassAllowed
 		decision.Reason = "guardian policy requires approval for every action"
+		if !autoExecuteAllowed {
+			decision.Reason = fmt.Sprintf("%s Blast radius %q is above the auto-execute limit %q.", decision.Reason, blastRadius, policy.Autonomy.MaxAutoExecuteBlastRadius)
+		}
 		return decision
 	}
 
 	if policy.Autonomy.Mode == "bypass_hotfix" && source == "critical_auto_remediation" &&
 		heimdallSeverityMeetsThreshold(firstNonEmpty(anyString(heimdallIncidentFromAction(action)["severity"]), "critical"), policy.Autonomy.HotfixSeverityThreshold) {
-		decision.ConfidenceBand = "bypass_hotfix"
-		decision.Reason = "guardian policy allows emergency bypass for this hotfix severity"
+		if hotfixBypassAllowed {
+			decision.ConfidenceBand = "bypass_hotfix"
+			decision.Reason = "guardian policy allows emergency bypass for this hotfix severity"
+			return decision
+		}
+		decision.RequireApproval = true
+		decision.ManualReview = true
+		decision.ConfidenceBand = "manual_review"
+		decision.Reason = fmt.Sprintf(
+			"incident qualifies for hotfix bypass, but blast radius %q exceeds the bypass limit %q",
+			blastRadius,
+			policy.Autonomy.MaxBypassHotfixBlastRadius,
+		)
 		return decision
 	}
 
 	if assessment.Confidence >= policy.Autonomy.AutoExecuteMinConfidence {
-		decision.Reason = "historical memory shows this playbook is safe enough to auto-execute"
+		if autoExecuteAllowed {
+			decision.Reason = "historical memory shows this playbook is safe enough to auto-execute"
+			return decision
+		}
+		decision.RequireApproval = true
+		decision.ManualReview = !hotfixBypassAllowed
+		if decision.ManualReview {
+			decision.ConfidenceBand = "manual_review"
+		} else {
+			decision.ConfidenceBand = "approval"
+		}
+		decision.Reason = fmt.Sprintf(
+			"historical memory is strong, but blast radius %q exceeds the auto-execute limit %q",
+			blastRadius,
+			policy.Autonomy.MaxAutoExecuteBlastRadius,
+		)
 		return decision
 	}
 
@@ -1104,6 +1149,23 @@ func heimdallDecisionFromAssessment(
 		decision.Reason = "historical confidence is low and requires manual review"
 	} else {
 		decision.Reason = "historical confidence is moderate, so approval is required before execution"
+	}
+	if !hotfixBypassAllowed {
+		decision.ManualReview = true
+		decision.ConfidenceBand = "manual_review"
+		decision.Reason = fmt.Sprintf(
+			"%s Blast radius %q exceeds the bypass limit %q.",
+			decision.Reason,
+			blastRadius,
+			policy.Autonomy.MaxBypassHotfixBlastRadius,
+		)
+	} else if !autoExecuteAllowed {
+		decision.Reason = fmt.Sprintf(
+			"%s Blast radius %q exceeds the auto-execute limit %q.",
+			decision.Reason,
+			blastRadius,
+			policy.Autonomy.MaxAutoExecuteBlastRadius,
+		)
 	}
 	return decision
 }
@@ -1116,6 +1178,76 @@ func heimdallConfidenceBand(policy model.GuardianPolicyManifestSpec, confidence 
 		return "manual_review"
 	default:
 		return "approval"
+	}
+}
+
+func heimdallResolveActionBlastRadius(action map[string]any) (string, string) {
+	if explicit := heimdallNormalizeBlastRadius(anyString(action["blast_radius"])); explicit != "" {
+		return explicit, "declared by the action payload"
+	}
+
+	actionType := strings.ToLower(strings.TrimSpace(anyString(action["type"])))
+	switch actionType {
+	case "dispatch_workflow":
+		if strings.TrimSpace(anyString(action["component_name"])) != "" {
+			return "medium", "workflow dispatch redeploys or reconciles one component"
+		}
+		return "high", "workflow dispatch without a narrow component target is treated as broader impact"
+	case "rightsize_component":
+		changePercent, _ := heimdallNumericDetail(action, "max_change_percent")
+		switch {
+		case changePercent <= 0:
+			return "medium", "right-size remediation changes live capacity on a bounded component"
+		case changePercent <= 25:
+			return "medium", fmt.Sprintf("right-size remediation is bounded to %.0f%% change", changePercent)
+		case changePercent <= 50:
+			return "high", fmt.Sprintf("right-size remediation can change live capacity by %.0f%%", changePercent)
+		default:
+			return "critical", fmt.Sprintf("right-size remediation can change live capacity by %.0f%%", changePercent)
+		}
+	case "rotate_secret":
+		return "medium", "secret rotation changes live credentials and may affect running components"
+	case "pull_request":
+		return "medium", "pull request automation proposes code changes without merging directly"
+	case "direct_push":
+		return "critical", "direct push mutates the repository without human review"
+	case "page_team":
+		return "low", "paging humans does not mutate runtime state"
+	default:
+		if strings.TrimSpace(anyString(action["repository"])) != "" {
+			return "high", "repository-targeted action is treated conservatively without an explicit blast radius"
+		}
+		return "high", "unknown action type defaults to a conservative blast radius"
+	}
+}
+
+func heimdallNormalizeBlastRadius(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "low", "medium", "high", "critical":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return ""
+	}
+}
+
+func heimdallBlastRadiusWithinLimit(radius string, limit string) bool {
+	return heimdallBlastRadiusRank(radius) > 0 &&
+		heimdallBlastRadiusRank(limit) > 0 &&
+		heimdallBlastRadiusRank(radius) <= heimdallBlastRadiusRank(limit)
+}
+
+func heimdallBlastRadiusRank(value string) int {
+	switch heimdallNormalizeBlastRadius(value) {
+	case "low":
+		return 1
+	case "medium":
+		return 2
+	case "high":
+		return 3
+	case "critical":
+		return 4
+	default:
+		return 0
 	}
 }
 
@@ -1144,6 +1276,9 @@ func createHeimdallApprovalRequest(
 		anyString(action["description"]),
 		fmt.Sprintf("Approval required for %s on %s/%s", actionType, componentNamespace, componentName),
 	)
+	if decision.BlastRadius != "" {
+		summary = fmt.Sprintf("%s [blast %s]", summary, decision.BlastRadius)
+	}
 	if decision.Confidence > 0 {
 		summary = fmt.Sprintf("%s (confidence %.0f%%, %s)", summary, decision.Confidence*100, firstNonEmpty(decision.ConfidenceBand, "review"))
 	}
@@ -1159,16 +1294,20 @@ func createHeimdallApprovalRequest(
 		Action:      cloneAuthorizationInput(action),
 		Incident:    heimdallIncidentFromAction(action),
 		Metadata: map[string]any{
-			"autonomy_mode":     policy.Autonomy.Mode,
-			"requested_at":      time.Now().UTC().Format(time.RFC3339),
-			"confidence":        round2(decision.Confidence),
-			"confidence_band":   decision.ConfidenceBand,
-			"confidence_reason": decision.Reason,
-			"manual_review":     decision.ManualReview,
-			"provider_group":    decision.ProviderGroup,
-			"incident_category": decision.IncidentCategory,
-			"attempts":          round2(decision.Attempts),
-			"recovery_rate":     round2(decision.RecoveryRate),
+			"autonomy_mode":      policy.Autonomy.Mode,
+			"requested_at":       time.Now().UTC().Format(time.RFC3339),
+			"confidence":         round2(decision.Confidence),
+			"confidence_band":    decision.ConfidenceBand,
+			"confidence_reason":  decision.Reason,
+			"manual_review":      decision.ManualReview,
+			"blast_radius":       decision.BlastRadius,
+			"blast_reason":       decision.BlastRadiusReason,
+			"auto_blast_limit":   strings.TrimSpace(policy.Autonomy.MaxAutoExecuteBlastRadius),
+			"bypass_blast_limit": strings.TrimSpace(policy.Autonomy.MaxBypassHotfixBlastRadius),
+			"provider_group":     decision.ProviderGroup,
+			"incident_category":  decision.IncidentCategory,
+			"attempts":           round2(decision.Attempts),
+			"recovery_rate":      round2(decision.RecoveryRate),
 		},
 	})
 
@@ -1943,6 +2082,8 @@ func heimdallDecisionMetadata(decision heimdallAutonomyDecision) map[string]any 
 		"confidence_band":   strings.TrimSpace(decision.ConfidenceBand),
 		"confidence_reason": strings.TrimSpace(decision.Reason),
 		"manual_review":     decision.ManualReview,
+		"blast_radius":      strings.TrimSpace(decision.BlastRadius),
+		"blast_reason":      strings.TrimSpace(decision.BlastRadiusReason),
 		"provider_group":    strings.TrimSpace(decision.ProviderGroup),
 		"incident_category": strings.TrimSpace(decision.IncidentCategory),
 		"attempts":          round2(decision.Attempts),
@@ -1975,6 +2116,7 @@ func heimdallAssessActionConfidenceFromMemories(
 	actionType := anyString(current["action_type"])
 	providerGroup := anyString(current["provider_group"])
 	incidentCategory := anyString(current["incident_category"])
+	blastRadius, blastRadiusReason := heimdallResolveActionBlastRadius(action)
 
 	if actionType == "" {
 		return heimdallDefaultActionConfidence(action)
@@ -2047,6 +2189,8 @@ func heimdallAssessActionConfidenceFromMemories(
 		ComponentScope:           bestScope,
 		ProviderGroup:            providerGroup,
 		IncidentCategory:         incidentCategory,
+		BlastRadius:              blastRadius,
+		BlastRadiusReason:        blastRadiusReason,
 	}
 }
 
@@ -2054,13 +2198,16 @@ func heimdallDefaultActionConfidence(action map[string]any) heimdallActionConfid
 	incident := heimdallIncidentFromAction(action)
 	evidence := heimdallActionEvidence(action)
 	current := heimdallActionLearningMetadata(action, incident, evidence)
+	blastRadius, blastRadiusReason := heimdallResolveActionBlastRadius(action)
 	return heimdallActionConfidenceAssessment{
-		Confidence:       0.3,
-		Attempts:         0,
-		RecoveryRate:     0,
-		ComponentScope:   "unknown",
-		ProviderGroup:    anyString(current["provider_group"]),
-		IncidentCategory: anyString(current["incident_category"]),
+		Confidence:        0.3,
+		Attempts:          0,
+		RecoveryRate:      0,
+		ComponentScope:    "unknown",
+		ProviderGroup:     anyString(current["provider_group"]),
+		IncidentCategory:  anyString(current["incident_category"]),
+		BlastRadius:       blastRadius,
+		BlastRadiusReason: blastRadiusReason,
 	}
 }
 
@@ -2776,6 +2923,8 @@ func heimdallPolicyInput(policy model.GuardianPolicyManifestSpec) map[string]any
 			"hotfix_severity":                policy.Autonomy.HotfixSeverityThreshold,
 			"auto_execute_min_confidence":    policy.Autonomy.AutoExecuteMinConfidence,
 			"manual_review_below_confidence": policy.Autonomy.ManualReviewBelowConfidence,
+			"max_auto_execute_blast_radius":  policy.Autonomy.MaxAutoExecuteBlastRadius,
+			"max_bypass_hotfix_blast_radius": policy.Autonomy.MaxBypassHotfixBlastRadius,
 		},
 	}
 }

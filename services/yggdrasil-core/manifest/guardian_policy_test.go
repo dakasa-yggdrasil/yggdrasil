@@ -69,6 +69,8 @@ func guardianPolicyFixture() model.GuardianPolicyManifestSpec {
 			HotfixSeverityThreshold:     "critical",
 			AutoExecuteMinConfidence:    0.7,
 			ManualReviewBelowConfidence: 0.25,
+			MaxAutoExecuteBlastRadius:   "medium",
+			MaxBypassHotfixBlastRadius:  "high",
 		},
 	}
 }
@@ -79,5 +81,15 @@ func TestValidateGuardianPolicySpecRejectsInvalidConfidenceThresholds(t *testing
 
 	if err := ValidateGuardianPolicySpec(spec); err == nil {
 		t.Fatal("expected invalid auto_execute_min_confidence to fail validation")
+	}
+}
+
+func TestValidateGuardianPolicySpecRejectsInvalidBlastRadiusOrder(t *testing.T) {
+	spec := guardianPolicyFixture()
+	spec.Autonomy.MaxAutoExecuteBlastRadius = "critical"
+	spec.Autonomy.MaxBypassHotfixBlastRadius = "medium"
+
+	if err := ValidateGuardianPolicySpec(spec); err == nil {
+		t.Fatal("expected invalid blast radius ordering to fail validation")
 	}
 }

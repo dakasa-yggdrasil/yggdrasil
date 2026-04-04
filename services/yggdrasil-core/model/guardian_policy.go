@@ -42,4 +42,6 @@ type GuardianAutonomyPolicySpec struct {
 	HotfixSeverityThreshold     string  `json:"hotfix_severity_threshold,omitempty"`
 	AutoExecuteMinConfidence    float64 `json:"auto_execute_min_confidence,omitempty"`
 	ManualReviewBelowConfidence float64 `json:"manual_review_below_confidence,omitempty"`
+	MaxAutoExecuteBlastRadius   string  `json:"max_auto_execute_blast_radius,omitempty"`
+	MaxBypassHotfixBlastRadius  string  `json:"max_bypass_hotfix_blast_radius,omitempty"`
 }

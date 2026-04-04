@@ -37,6 +37,15 @@ func ValidateGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) error {
 	if !slices.Contains(supportedGuardianSeverityThresholds, spec.Autonomy.HotfixSeverityThreshold) {
 		return fmt.Errorf("guardian_policy autonomy hotfix_severity_threshold %q is unsupported", spec.Autonomy.HotfixSeverityThreshold)
 	}
+	if !slices.Contains(supportedGuardianSeverityThresholds, spec.Autonomy.MaxAutoExecuteBlastRadius) {
+		return fmt.Errorf("guardian_policy autonomy max_auto_execute_blast_radius %q is unsupported", spec.Autonomy.MaxAutoExecuteBlastRadius)
+	}
+	if !slices.Contains(supportedGuardianSeverityThresholds, spec.Autonomy.MaxBypassHotfixBlastRadius) {
+		return fmt.Errorf("guardian_policy autonomy max_bypass_hotfix_blast_radius %q is unsupported", spec.Autonomy.MaxBypassHotfixBlastRadius)
+	}
+	if supportedGuardianSeverityRank(spec.Autonomy.MaxAutoExecuteBlastRadius) > supportedGuardianSeverityRank(spec.Autonomy.MaxBypassHotfixBlastRadius) {
+		return fmt.Errorf("guardian_policy autonomy max_auto_execute_blast_radius must be <= max_bypass_hotfix_blast_radius")
+	}
 	if spec.Autonomy.AutoExecuteMinConfidence < 0 || spec.Autonomy.AutoExecuteMinConfidence > 1 {
 		return fmt.Errorf("guardian_policy autonomy auto_execute_min_confidence must be between 0 and 1")
 	}
@@ -87,6 +96,14 @@ func NormalizeGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) model.Gu
 	if spec.Autonomy.HotfixSeverityThreshold == "" {
 		spec.Autonomy.HotfixSeverityThreshold = "critical"
 	}
+	spec.Autonomy.MaxAutoExecuteBlastRadius = strings.ToLower(strings.TrimSpace(spec.Autonomy.MaxAutoExecuteBlastRadius))
+	if spec.Autonomy.MaxAutoExecuteBlastRadius == "" {
+		spec.Autonomy.MaxAutoExecuteBlastRadius = "medium"
+	}
+	spec.Autonomy.MaxBypassHotfixBlastRadius = strings.ToLower(strings.TrimSpace(spec.Autonomy.MaxBypassHotfixBlastRadius))
+	if spec.Autonomy.MaxBypassHotfixBlastRadius == "" {
+		spec.Autonomy.MaxBypassHotfixBlastRadius = "high"
+	}
 	if spec.Autonomy.AutoExecuteMinConfidence <= 0 {
 		spec.Autonomy.AutoExecuteMinConfidence = 0.7
 	}
@@ -111,4 +128,19 @@ func guardianPolicySelectorProvided(selector model.ManifestSelector) bool {
 		strings.TrimSpace(selector.Namespace) != "" ||
 		strings.TrimSpace(selector.Name) != "" ||
 		selector.Version != nil
+}
+
+func supportedGuardianSeverityRank(value string) int {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "low":
+		return 1
+	case "medium":
+		return 2
+	case "high":
+		return 3
+	case "critical":
+		return 4
+	default:
+		return 0
+	}
 }

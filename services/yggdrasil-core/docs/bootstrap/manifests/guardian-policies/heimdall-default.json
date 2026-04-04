@@ -21,7 +21,9 @@
       "allow_llm_fallback": false,
       "hotfix_severity_threshold": "critical",
       "auto_execute_min_confidence": 0.7,
-      "manual_review_below_confidence": 0.25
+      "manual_review_below_confidence": 0.25,
+      "max_auto_execute_blast_radius": "medium",
+      "max_bypass_hotfix_blast_radius": "high"
     },
     "auto_heal": {
       "enabled": true,

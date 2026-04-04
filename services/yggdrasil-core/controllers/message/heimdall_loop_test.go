@@ -218,6 +218,7 @@ func TestHeimdallDecisionFromAssessmentAutoExecutesTrustedPlaybooks(t *testing.T
 		map[string]any{
 			"type":              "dispatch_workflow",
 			"incident_severity": "critical",
+			"blast_radius":      "medium",
 		},
 		model.GuardianPolicyManifestSpec{
 			Autonomy: model.GuardianAutonomyPolicySpec{
@@ -225,6 +226,8 @@ func TestHeimdallDecisionFromAssessmentAutoExecutesTrustedPlaybooks(t *testing.T
 				AutoExecuteMinConfidence:    0.7,
 				ManualReviewBelowConfidence: 0.25,
 				HotfixSeverityThreshold:     "critical",
+				MaxAutoExecuteBlastRadius:   "medium",
+				MaxBypassHotfixBlastRadius:  "high",
 			},
 		},
 		"critical_auto_remediation",
@@ -258,6 +261,8 @@ func TestHeimdallDecisionFromAssessmentRequiresManualReviewForLowConfidence(t *t
 				AutoExecuteMinConfidence:    0.7,
 				ManualReviewBelowConfidence: 0.25,
 				HotfixSeverityThreshold:     "critical",
+				MaxAutoExecuteBlastRadius:   "medium",
+				MaxBypassHotfixBlastRadius:  "high",
 			},
 		},
 		"critical_auto_remediation",
@@ -275,6 +280,80 @@ func TestHeimdallDecisionFromAssessmentRequiresManualReviewForLowConfidence(t *t
 	}
 	if !decision.ManualReview {
 		t.Fatal("expected low-confidence playbook to require manual review")
+	}
+	if decision.ConfidenceBand != "manual_review" {
+		t.Fatalf("confidence band = %q, want manual_review", decision.ConfidenceBand)
+	}
+}
+
+func TestHeimdallDecisionFromAssessmentRequiresApprovalForHighBlastRadius(t *testing.T) {
+	decision := heimdallDecisionFromAssessment(
+		map[string]any{
+			"type":         "dispatch_workflow",
+			"blast_radius": "high",
+		},
+		model.GuardianPolicyManifestSpec{
+			Autonomy: model.GuardianAutonomyPolicySpec{
+				Mode:                        "policy_bound",
+				AutoExecuteMinConfidence:    0.7,
+				ManualReviewBelowConfidence: 0.25,
+				HotfixSeverityThreshold:     "critical",
+				MaxAutoExecuteBlastRadius:   "medium",
+				MaxBypassHotfixBlastRadius:  "high",
+			},
+		},
+		"critical_auto_remediation",
+		heimdallActionConfidenceAssessment{
+			Confidence:       0.93,
+			ProviderGroup:    "github",
+			IncidentCategory: "runtime",
+			Attempts:         6,
+			RecoveryRate:     0.95,
+		},
+	)
+
+	if !decision.RequireApproval {
+		t.Fatal("expected high blast radius playbook to require approval")
+	}
+	if decision.ManualReview {
+		t.Fatal("expected high blast radius playbook to require approval, not manual review")
+	}
+	if decision.BlastRadius != "high" {
+		t.Fatalf("blast radius = %q, want high", decision.BlastRadius)
+	}
+}
+
+func TestHeimdallDecisionFromAssessmentRequiresManualReviewForCriticalBlastRadius(t *testing.T) {
+	decision := heimdallDecisionFromAssessment(
+		map[string]any{
+			"type":         "direct_push",
+			"blast_radius": "critical",
+		},
+		model.GuardianPolicyManifestSpec{
+			Autonomy: model.GuardianAutonomyPolicySpec{
+				Mode:                        "policy_bound",
+				AutoExecuteMinConfidence:    0.7,
+				ManualReviewBelowConfidence: 0.25,
+				HotfixSeverityThreshold:     "critical",
+				MaxAutoExecuteBlastRadius:   "medium",
+				MaxBypassHotfixBlastRadius:  "high",
+			},
+		},
+		"critical_auto_remediation",
+		heimdallActionConfidenceAssessment{
+			Confidence:       0.97,
+			ProviderGroup:    "github",
+			IncidentCategory: "repository",
+			Attempts:         3,
+			RecoveryRate:     1,
+		},
+	)
+
+	if !decision.RequireApproval {
+		t.Fatal("expected critical blast radius playbook to require approval")
+	}
+	if !decision.ManualReview {
+		t.Fatal("expected critical blast radius playbook to require manual review")
 	}
 	if decision.ConfidenceBand != "manual_review" {
 		t.Fatalf("confidence band = %q, want manual_review", decision.ConfidenceBand)
