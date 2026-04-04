@@ -45,6 +45,7 @@ task integrations:tui
 - `integrations/*/.env`: variáveis específicas de cada plugin
 - o console de referência usa o `yggdrasil-core` HTTP em `http://localhost:9080` por padrão no host
 - as surfaces de referência são repositórios instaláveis, não código obrigatoriamente vendorizado no produto
+- cada integration usa `docker-compose.yml` como base compatível com o monorepo e `docker-compose.standalone.yml` para o modo standalone do próprio repositório
 
 Cada slice carrega:
 

@@ -124,6 +124,9 @@ export YGGDRASIL_INTEGRATIONS_DEV_DIR=/caminho/para/repos-de-integrations
 
 Sem essas variáveis, o installation manager sempre usa os repositórios remotos do catálogo.
 
+No monorepo, cada integration publica um `docker-compose.yml` compatível com o stack raiz.
+Quando você roda um plugin isoladamente no próprio repositório, o `Taskfile` dele combina essa base com `docker-compose.standalone.yml`.
+
 Inicialize os arquivos `.env`:
 
 ```bash

@@ -1,7 +1,6 @@
 services:
   yggdrasil-postgres:
     image: ${POSTGRES_IMAGE}
-    container_name: yggdrasil-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -20,7 +19,6 @@ services:
 
   yggdrasil-rabbitmq:
     image: ${RABBITMQ_IMAGE}
-    container_name: yggdrasil-rabbitmq
     user: "0:0"
     entrypoint:
       - /bin/sh

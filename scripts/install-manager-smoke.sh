@@ -118,19 +118,6 @@ test "$console_url" = "https://github.com/dakasa-yggdrasil/surface-console.git"
 echo "Validating compose in isolated workspace..."
 COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh config >/dev/null
 
-echo "Removing catalog integrations after install validation..."
-./scripts/ygg.sh integrations remove aws >/dev/null
-./scripts/ygg.sh integrations remove github >/dev/null
-
-if ./scripts/ygg.sh integrations installed | grep -q 'integrations/integration-aws/docker-compose.yml'; then
-  echo "integration-aws should have been removed from the isolated workspace" >&2
-  exit 1
-fi
-if ./scripts/ygg.sh integrations installed | grep -q 'integrations/integration-github/docker-compose.yml'; then
-  echo "integration-github should have been removed from the isolated workspace" >&2
-  exit 1
-fi
-
 echo "Bringing isolated stack up..."
 COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh up -d >/dev/null
 
@@ -164,5 +151,13 @@ if ! wait_for_url "http://127.0.0.1:13080/healthz" 120 2; then
   echo "isolated console did not become healthy in time" >&2
   exit 1
 fi
+
+for service in integration-aws integration-github; do
+  if ! COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/docker-compose.sh ps --services --status running | grep -qx "$service"; then
+    dump_compose_logs
+    echo "expected $service to be running in the isolated workspace" >&2
+    exit 1
+  fi
+done
 
 echo "Installation manager smoke passed."
