@@ -3,6 +3,7 @@ package message
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -33,6 +34,11 @@ var (
 type heimdallRepositoryBinding struct {
 	Manifest model.Manifest
 	Spec     model.RepositoryBindingManifestSpec
+}
+
+type heimdallRemediationContract struct {
+	Manifest model.Manifest
+	Spec     model.RemediationContractManifestSpec
 }
 
 // StartHeimdallGuardianLoop runs the periodic closed-loop guardian sweep.
@@ -106,6 +112,14 @@ func runHeimdallGuardianSweep(
 	if err != nil {
 		if logger != nil {
 			logger.Warn("heimdall guardian sweep failed to load guardian policy", zap.Error(err))
+		}
+		return
+	}
+
+	remediationContracts, err := loadHeimdallRemediationContracts(ctx, db)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("heimdall guardian sweep failed to load remediation contracts", zap.Error(err))
 		}
 		return
 	}
@@ -216,6 +230,7 @@ func runHeimdallGuardianSweep(
 					db,
 					actions,
 					repositoryBindings,
+					remediationContracts,
 					policy,
 					"critical_auto_remediation",
 					actionsExecuted,
@@ -262,6 +277,7 @@ func runHeimdallGuardianSweep(
 				db,
 				actions,
 				repositoryBindings,
+				remediationContracts,
 				policy,
 				"cost_optimization",
 				actionsExecuted,
@@ -330,11 +346,37 @@ func loadGuardianPolicyForInstance(ctx context.Context, db *sql.DB, instanceMani
 			MaxActionsPerSweep:    1,
 			CooldownSeconds:       300,
 			AllowDispatchWorkflow: true,
+			AllowRightsize:        true,
 		},
 		CostOptimization: model.GuardianCostOptimizationPolicySpec{
 			Enabled: false,
 		},
 	}), nil
+}
+
+func loadHeimdallRemediationContracts(ctx context.Context, db *sql.DB) (map[string]heimdallRemediationContract, error) {
+	manifests, err := repository.ListManifests(ctx, db, model.ListManifestFilters{
+		Kind:       "remediation_contract",
+		ActiveOnly: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	contracts := make(map[string]heimdallRemediationContract, len(manifests))
+	for _, manifestRecord := range manifests {
+		spec, err := manifestengine.ParseRemediationContractSpec(manifestRecord.Spec)
+		if err != nil {
+			return nil, err
+		}
+		spec = manifestengine.NormalizeRemediationContractSpec(spec)
+		contracts[heimdallComponentKey(spec.ComponentKind, spec.ComponentNamespace, spec.ComponentName)] = heimdallRemediationContract{
+			Manifest: manifestRecord,
+			Spec:     spec,
+		}
+	}
+
+	return contracts, nil
 }
 
 func guardianPolicyTargetsInstance(spec model.GuardianPolicyManifestSpec, instanceManifest model.Manifest) bool {
@@ -543,21 +585,41 @@ func heimdallIntegrationIncidents(health model.IntegrationInstanceHealth, item m
 		severity = "high"
 		category = "contract"
 	default:
-		return nil
+		severity = ""
 	}
 
-	return []map[string]any{{
-		"severity":            severity,
-		"status":              "open",
-		"category":            category,
-		"title":               fmt.Sprintf("Integration %s is %s", health.IntegrationInstance.Name, status),
-		"message":             health.RuntimeState.Message,
-		"component_kind":      "integration",
-		"component_name":      health.IntegrationInstance.Name,
-		"component_namespace": health.IntegrationInstance.Namespace,
-		"repository":          anyString(item["repository"]),
-		"evidence":            cloneAuthorizationInput(health.RuntimeState.Details),
-	}}
+	incidents := make([]map[string]any, 0, 2)
+	if severity != "" {
+		incidents = append(incidents, map[string]any{
+			"severity":            severity,
+			"status":              "open",
+			"category":            category,
+			"title":               fmt.Sprintf("Integration %s is %s", health.IntegrationInstance.Name, status),
+			"message":             health.RuntimeState.Message,
+			"component_kind":      "integration",
+			"component_name":      health.IntegrationInstance.Name,
+			"component_namespace": health.IntegrationInstance.Namespace,
+			"repository":          anyString(item["repository"]),
+			"evidence":            cloneAuthorizationInput(health.RuntimeState.Details),
+		})
+	}
+
+	if heimdallRuntimeIndicatesOOM(health.RuntimeState) {
+		incidents = append(incidents, map[string]any{
+			"severity":            "critical",
+			"status":              "open",
+			"category":            "capacity",
+			"title":               fmt.Sprintf("Integration %s was OOM killed", health.IntegrationInstance.Name),
+			"message":             firstNonEmpty(health.RuntimeState.Message, "The runtime reported an OOM termination and likely needs a bounded memory increase."),
+			"component_kind":      "integration",
+			"component_name":      health.IntegrationInstance.Name,
+			"component_namespace": health.IntegrationInstance.Namespace,
+			"repository":          anyString(item["repository"]),
+			"evidence":            cloneAuthorizationInput(health.RuntimeState.Details),
+		})
+	}
+
+	return incidents
 }
 
 func executeHeimdallActions(
@@ -566,6 +628,7 @@ func executeHeimdallActions(
 	db *sql.DB,
 	actions []map[string]any,
 	repositoryBindings map[string]heimdallRepositoryBinding,
+	remediationContracts map[string]heimdallRemediationContract,
 	policy model.GuardianPolicyManifestSpec,
 	source string,
 	executedSoFar int,
@@ -576,7 +639,7 @@ func executeHeimdallActions(
 		if executed >= policy.AutoHeal.MaxActionsPerSweep {
 			break
 		}
-		if err := executeHeimdallAction(ctx, conn, db, action, repositoryBindings, policy, source); err != nil {
+		if err := executeHeimdallAction(ctx, conn, db, action, repositoryBindings, remediationContracts, policy, source); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -593,6 +656,7 @@ func executeHeimdallAction(
 	db *sql.DB,
 	action map[string]any,
 	repositoryBindings map[string]heimdallRepositoryBinding,
+	remediationContracts map[string]heimdallRemediationContract,
 	policy model.GuardianPolicyManifestSpec,
 	source string,
 ) error {
@@ -604,7 +668,14 @@ func executeHeimdallAction(
 		}
 		return executeHeimdallWorkflowDispatch(ctx, conn, db, action, repositoryBindings, policy, source)
 	case "rightsize_component":
-		return fmt.Errorf("rightsize_component requires a repository-specific deploy contract and is recommendation-only for now")
+		allowRightsize := policy.AutoHeal.AllowRightsize
+		if source == "cost_optimization" {
+			allowRightsize = policy.CostOptimization.AllowRightsize
+		}
+		if !allowRightsize {
+			return fmt.Errorf("heimdall guardian policy blocks rightsize_component actions")
+		}
+		return executeHeimdallContractAction(ctx, conn, db, action, repositoryBindings, remediationContracts, policy, source)
 	case "rotate_secret":
 		if !policy.AutoHeal.AllowRotateSecret {
 			return fmt.Errorf("heimdall guardian policy blocks rotate_secret actions")
@@ -635,17 +706,7 @@ func executeHeimdallWorkflowDispatch(
 	workflow := firstNonEmpty(anyString(action["workflow"]), binding.Spec.DeployWorkflow, defaultHeimdallDispatchWorkflow)
 	ref := firstNonEmpty(anyString(action["ref"]), binding.Spec.DefaultBranch, defaultHeimdallDispatchBranch)
 	repositoryName := firstNonEmpty(anyString(action["repository"]), binding.Spec.Repository)
-	inputs := map[string]any{
-		"component_kind": firstNonEmpty(anyString(action["component_kind"]), binding.Spec.ComponentKind),
-		"component_name": firstNonEmpty(anyString(action["component_name"]), binding.Spec.ComponentName),
-		"commit_sha":     "",
-		"actor":          defaultHeimdallDispatchActor,
-		"event_name":     source,
-		"environment":    firstNonEmpty(anyString(binding.Spec.Metadata["environment"]), defaultHeimdallDispatchEnvironment),
-		"commit_message": firstNonEmpty(anyString(action["reason"]), source),
-		"source_run_url": "",
-		"source_run_id":  "heimdall-guardian-loop",
-	}
+	inputs := heimdallBuildWorkflowInputs(action, binding.Spec, source, nil)
 
 	if !heimdallActionCooldownAllowed(action, binding.Spec, policy) {
 		return fmt.Errorf("heimdall action for %s is still in cooldown", binding.Spec.Repository)
@@ -670,6 +731,95 @@ func executeHeimdallWorkflowDispatch(
 				"policy":              policy.Scope,
 				"component_namespace": binding.Spec.ComponentNamespace,
 				"dispatched":          time.Now().UTC().Format(time.RFC3339),
+			},
+		},
+	}, 0)
+	if err != nil {
+		return err
+	}
+
+	markHeimdallActionCooldown(action, binding.Spec)
+	return nil
+}
+
+func executeHeimdallContractAction(
+	ctx context.Context,
+	conn *amqp.Connection,
+	db *sql.DB,
+	action map[string]any,
+	repositoryBindings map[string]heimdallRepositoryBinding,
+	remediationContracts map[string]heimdallRemediationContract,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+) error {
+	contract, contractAction, err := resolveHeimdallContractAction(action, remediationContracts)
+	if err != nil {
+		return err
+	}
+	if !contractAction.AutoExecute {
+		return fmt.Errorf("remediation contract %s/%s action %q is not marked auto_execute", contract.Manifest.Metadata.Namespace, contract.Manifest.Metadata.Name, contractAction.Name)
+	}
+
+	switch contractAction.Mode {
+	case model.RemediationContractActionModeWorkflowDispatch:
+		return executeHeimdallContractWorkflowDispatch(ctx, conn, db, action, repositoryBindings, contract, contractAction, policy, source)
+	default:
+		return fmt.Errorf("remediation contract action mode %q is unsupported", contractAction.Mode)
+	}
+}
+
+func executeHeimdallContractWorkflowDispatch(
+	ctx context.Context,
+	conn *amqp.Connection,
+	db *sql.DB,
+	action map[string]any,
+	repositoryBindings map[string]heimdallRepositoryBinding,
+	contract heimdallRemediationContract,
+	contractAction model.RemediationContractActionSpec,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+) error {
+	binding, err := heimdallWorkflowDispatchBinding(action, repositoryBindings, contract, contractAction)
+	if err != nil {
+		return err
+	}
+	if !heimdallActionCooldownAllowed(action, binding.Spec, policy) {
+		return fmt.Errorf("heimdall action for %s is still in cooldown", binding.Spec.Repository)
+	}
+
+	repositoryName := firstNonEmpty(binding.Spec.Repository, contractAction.WorkflowDispatch.Repository)
+	workflow := firstNonEmpty(contractAction.WorkflowDispatch.Workflow, binding.Spec.DeployWorkflow, defaultHeimdallDispatchWorkflow)
+	ref := firstNonEmpty(contractAction.WorkflowDispatch.Ref, binding.Spec.DefaultBranch, defaultHeimdallDispatchBranch)
+	inputs := heimdallBuildWorkflowInputs(action, binding.Spec, source, contractAction.WorkflowDispatch.Inputs)
+	inputs["remediation_type"] = strings.ToLower(strings.TrimSpace(contractAction.Name))
+	inputs["remediation_reason"] = firstNonEmpty(anyString(action["reason"]), anyString(action["description"]), source)
+	inputs["remediation_payload"] = heimdallActionPayload(action)
+
+	_, err = executeIntegrationRequest(ctx, conn, db, model.ExecuteIntegrationRequest{
+		Integration: model.ManifestSelector{
+			Namespace: "global",
+			Name:      "github-caller",
+		},
+		Operation:  "dispatch_workflow",
+		Capability: "dispatch_workflow",
+		Input: map[string]any{
+			"repository": repositoryName,
+			"workflow":   workflow,
+			"ref":        ref,
+			"inputs":     inputs,
+			"metadata": map[string]any{
+				"source":              "core.heimdall.guardian_loop",
+				"action":              action,
+				"binding":             binding.Spec.Repository,
+				"policy":              policy.Scope,
+				"component_namespace": binding.Spec.ComponentNamespace,
+				"dispatched":          time.Now().UTC().Format(time.RFC3339),
+				"remediation_contract": map[string]any{
+					"namespace": contract.Manifest.Metadata.Namespace,
+					"name":      contract.Manifest.Metadata.Name,
+					"action":    contractAction.Name,
+					"mode":      contractAction.Mode,
+				},
 			},
 		},
 	}, 0)
@@ -774,6 +924,72 @@ func resolveHeimdallActionBinding(
 	return heimdallRepositoryBinding{}, fmt.Errorf("no repository binding matched Heimdall action")
 }
 
+func resolveHeimdallContractAction(
+	action map[string]any,
+	contracts map[string]heimdallRemediationContract,
+) (heimdallRemediationContract, model.RemediationContractActionSpec, error) {
+	componentKind := firstNonEmpty(anyString(action["component_kind"]), anyString(action["kind"]))
+	componentNamespace := firstNonEmpty(anyString(action["component_namespace"]), anyString(action["namespace"]), "global")
+	componentName := firstNonEmpty(anyString(action["component_name"]), anyString(action["name"]))
+	if componentKind == "" || componentName == "" {
+		return heimdallRemediationContract{}, model.RemediationContractActionSpec{}, fmt.Errorf("heimdall remediation action is missing component identity")
+	}
+
+	contract, ok := contracts[heimdallComponentKey(componentKind, componentNamespace, componentName)]
+	if !ok {
+		return heimdallRemediationContract{}, model.RemediationContractActionSpec{}, fmt.Errorf("no remediation contract matched Heimdall action for %s/%s", componentNamespace, componentName)
+	}
+
+	actionType := strings.ToLower(strings.TrimSpace(anyString(action["type"])))
+	for _, candidate := range contract.Spec.Actions {
+		if strings.EqualFold(candidate.Name, actionType) {
+			return contract, candidate, nil
+		}
+	}
+
+	return heimdallRemediationContract{}, model.RemediationContractActionSpec{}, fmt.Errorf("remediation contract %s/%s does not expose action %q", contract.Manifest.Metadata.Namespace, contract.Manifest.Metadata.Name, actionType)
+}
+
+func heimdallWorkflowDispatchBinding(
+	action map[string]any,
+	repositoryBindings map[string]heimdallRepositoryBinding,
+	contract heimdallRemediationContract,
+	contractAction model.RemediationContractActionSpec,
+) (heimdallRepositoryBinding, error) {
+	if binding, err := resolveHeimdallActionBinding(action, repositoryBindings); err == nil {
+		if contractAction.WorkflowDispatch != nil {
+			binding.Spec.Repository = firstNonEmpty(contractAction.WorkflowDispatch.Repository, binding.Spec.Repository)
+			binding.Spec.DeployWorkflow = firstNonEmpty(contractAction.WorkflowDispatch.Workflow, binding.Spec.DeployWorkflow)
+			binding.Spec.DefaultBranch = firstNonEmpty(contractAction.WorkflowDispatch.Ref, binding.Spec.DefaultBranch)
+		}
+		return binding, nil
+	}
+
+	if contractAction.WorkflowDispatch == nil {
+		return heimdallRepositoryBinding{}, fmt.Errorf("remediation contract action does not define workflow dispatch settings")
+	}
+
+	repositoryName := strings.TrimSpace(contractAction.WorkflowDispatch.Repository)
+	if repositoryName == "" {
+		return heimdallRepositoryBinding{}, fmt.Errorf("remediation contract %s/%s requires either a repository binding or workflow_dispatch.repository", contract.Manifest.Metadata.Namespace, contract.Manifest.Metadata.Name)
+	}
+
+	return heimdallRepositoryBinding{
+		Spec: model.RepositoryBindingManifestSpec{
+			ComponentKind:      contract.Spec.ComponentKind,
+			ComponentNamespace: contract.Spec.ComponentNamespace,
+			ComponentName:      contract.Spec.ComponentName,
+			Repository:         repositoryName,
+			DefaultBranch:      contractAction.WorkflowDispatch.Ref,
+			DeployWorkflow:     contractAction.WorkflowDispatch.Workflow,
+			Automation: model.RepositoryBindingAutomationSpec{
+				AllowDispatchWorkflow: true,
+			},
+			Metadata: cloneAuthorizationInput(contract.Spec.Metadata),
+		},
+	}, nil
+}
+
 func heimdallComponentKey(kind, namespace, name string) string {
 	kind = strings.ToLower(strings.TrimSpace(kind))
 	namespace = strings.ToLower(strings.TrimSpace(namespace))
@@ -848,6 +1064,94 @@ func heimdallCostActions(output any, policy model.GuardianPolicyManifestSpec) []
 		actions = append(actions, cloneAuthorizationInput(action))
 	}
 	return actions
+}
+
+func heimdallRuntimeIndicatesOOM(state *model.IntegrationRuntimeState) bool {
+	if state == nil {
+		return false
+	}
+	if heimdallBoolDetail(state.Details, "oom_killed", "oom", "memory_pressure") {
+		return true
+	}
+	message := strings.ToLower(strings.TrimSpace(state.Message))
+	return strings.Contains(message, "oom") || strings.Contains(message, "out of memory")
+}
+
+func heimdallBoolDetail(details map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		value, ok := details[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case bool:
+			if typed {
+				return true
+			}
+		case string:
+			normalized := strings.ToLower(strings.TrimSpace(typed))
+			if normalized == "true" || normalized == "yes" || normalized == "1" || normalized == "oomkilled" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func heimdallBuildWorkflowInputs(
+	action map[string]any,
+	binding model.RepositoryBindingManifestSpec,
+	source string,
+	extraInputs map[string]any,
+) map[string]any {
+	inputs := map[string]any{}
+	if workflowInputs := heimdallWorkflowInputsFromAction(action); len(workflowInputs) > 0 {
+		inputs = mergeStringAnyMaps(inputs, workflowInputs)
+	}
+	if len(extraInputs) > 0 {
+		inputs = mergeStringAnyMaps(inputs, cloneAuthorizationInput(extraInputs))
+	}
+
+	inputs["component_kind"] = firstNonEmpty(anyString(action["component_kind"]), binding.ComponentKind)
+	inputs["component_name"] = firstNonEmpty(anyString(action["component_name"]), binding.ComponentName)
+	inputs["component_namespace"] = firstNonEmpty(anyString(action["component_namespace"]), binding.ComponentNamespace, "global")
+	inputs["commit_sha"] = ""
+	inputs["actor"] = defaultHeimdallDispatchActor
+	inputs["event_name"] = source
+	inputs["environment"] = firstNonEmpty(anyString(binding.Metadata["environment"]), defaultHeimdallDispatchEnvironment)
+	inputs["commit_message"] = firstNonEmpty(anyString(action["reason"]), source)
+	inputs["source_run_url"] = ""
+	inputs["source_run_id"] = "heimdall-guardian-loop"
+
+	return inputs
+}
+
+func heimdallWorkflowInputsFromAction(action map[string]any) map[string]any {
+	workflow, ok := action["workflow"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	switch typed := workflow["inputs"].(type) {
+	case map[string]any:
+		return cloneAuthorizationInput(typed)
+	case map[string]string:
+		result := make(map[string]any, len(typed))
+		for key, value := range typed {
+			result[key] = value
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func heimdallActionPayload(action map[string]any) string {
+	payload := cloneAuthorizationInput(action)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
 }
 
 func heimdallMapSliceField(output any, field string) []map[string]any {

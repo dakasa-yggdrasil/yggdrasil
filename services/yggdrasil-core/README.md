@@ -1,6 +1,6 @@
 # yggdrasil-core
 
-`yggdrasil-core` is the central control plane for Yggdrasil. It owns the core database, serves the synchronous HTTP API used by reference surfaces, stores manifests, and evaluates the rules that drive internal and third-party authorization. The first supported manifest kinds are `rbac`, `policy`, `integration_type`, `integration_instance`, `resource`, `surface`, `repository_binding`, `guardian_policy`, `product`, and `workflow`.
+`yggdrasil-core` is the central control plane for Yggdrasil. It owns the core database, serves the synchronous HTTP API used by reference surfaces, stores manifests, and evaluates the rules that drive internal and third-party authorization. The first supported manifest kinds are `rbac`, `policy`, `integration_type`, `integration_instance`, `resource`, `surface`, `repository_binding`, `guardian_policy`, `remediation_contract`, `product`, and `workflow`.
 
 The current service foundation includes:
 
@@ -22,10 +22,11 @@ The current service foundation includes:
 - surface manifest parsing and validation
 - repository_binding manifest parsing and validation
 - guardian_policy manifest parsing and validation
+- remediation_contract manifest parsing and validation
 - product manifest parsing and validation
 - workflow manifest parsing, rendering, and execution
 - generic integration execution through configured integration instances
-- closed-loop Heimdall guardian sweeps backed by repository bindings and guardian policies
+- closed-loop Heimdall guardian sweeps backed by repository bindings, guardian policies, and remediation contracts
 - composed authorization evaluation across RBAC and policy
 - structured logging for worker execution
 - direct auth/session HTTP endpoints under `/api/v1/auth/...`
@@ -68,6 +69,7 @@ The first supported kinds are:
 - `surface`
 - `repository_binding`
 - `guardian_policy`
+- `remediation_contract`
 - `product`
 - `workflow`
 
@@ -140,6 +142,14 @@ The first supported kinds are:
 - auto-heal severity threshold, cooldown, and max-action limits
 - explicit allow/deny gates for workflow dispatch, secret rotation, and right-sizing
 - repository automation and cost-optimization boundaries
+
+`remediation_contract` has:
+
+- one component selector by `component_kind`, `component_namespace`, and `component_name`
+- one or more named bounded remediation actions such as `rightsize_component`
+- an explicit execution mode, currently `workflow_dispatch`
+- an `auto_execute` flag per action so guardians only run opt-in playbooks
+- optional workflow defaults and remediation-specific inputs forwarded to the repo workflow
 
 `product` has:
 

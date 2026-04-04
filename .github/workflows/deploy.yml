@@ -13,6 +13,11 @@ on:
         required: false
         default: yggdrasil
         type: string
+      component_namespace:
+        description: Stable ecosystem component namespace.
+        required: false
+        default: global
+        type: string
       commit_sha:
         description: Source commit SHA forwarded by the core workflow.
         required: false
@@ -48,6 +53,26 @@ on:
         required: false
         default: ""
         type: string
+      remediation_contract:
+        description: Optional remediation contract identifier.
+        required: false
+        default: ""
+        type: string
+      remediation_type:
+        description: Optional remediation action type.
+        required: false
+        default: ""
+        type: string
+      remediation_reason:
+        description: Optional remediation reason.
+        required: false
+        default: ""
+        type: string
+      remediation_payload:
+        description: Optional serialized remediation payload.
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -72,7 +97,7 @@ jobs:
           cat <<EOF >> "$GITHUB_STEP_SUMMARY"
           ## Yggdrasil deploy request
 
-          - Component: \`${{ inputs.component_kind }}:${{ inputs.component_name }}\`
+          - Component: \`${{ inputs.component_kind }}:${{ inputs.component_namespace }}:${{ inputs.component_name }}\`
           - Environment: \`${{ inputs.environment }}\`
           - Source event: \`${{ inputs.event_name }}\`
           - Source actor: \`${{ inputs.actor || 'unknown' }}\`
@@ -81,6 +106,17 @@ jobs:
 
           if [ -n "${{ inputs.source_run_url }}" ]; then
             echo "- Source run: ${{ inputs.source_run_url }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -n "${{ inputs.remediation_type }}" ]; then
+            cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+
+          ## Remediation context
+
+          - Contract: \`${{ inputs.remediation_contract || 'n/a' }}\`
+          - Type: \`${{ inputs.remediation_type }}\`
+          - Reason: \`${{ inputs.remediation_reason || 'n/a' }}\`
+          EOF
           fi
 
       - name: Verify toolchain

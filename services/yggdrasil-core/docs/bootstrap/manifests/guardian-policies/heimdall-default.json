@@ -23,7 +23,7 @@
       "cooldown_seconds": 300,
       "allow_dispatch_workflow": true,
       "allow_rotate_secret": false,
-      "allow_rightsize": false
+      "allow_rightsize": true
     },
     "repository_automation": {
       "allow_pull_request_automation": false,

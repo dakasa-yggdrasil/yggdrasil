@@ -168,6 +168,8 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/repository-bindings", server.handleRepositoryBindingCreate)
 	mux.HandleFunc("GET /api/v1/guardian-policies", server.handleGuardianPolicyList)
 	mux.HandleFunc("POST /api/v1/guardian-policies", server.handleGuardianPolicyCreate)
+	mux.HandleFunc("GET /api/v1/remediation-contracts", server.handleRemediationContractList)
+	mux.HandleFunc("POST /api/v1/remediation-contracts", server.handleRemediationContractCreate)
 	mux.HandleFunc("GET /api/v1/surfaces", server.handleSurfaceList)
 	mux.HandleFunc("POST /api/v1/surfaces", server.handleSurfaceCreate)
 	mux.HandleFunc("GET /api/v1/workflows", server.handleWorkflowList)
@@ -204,6 +206,8 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/console/repository-bindings", server.handleRepositoryBindingCreate)
 	mux.HandleFunc("GET /api/v1/console/guardian-policies", server.handleGuardianPolicyList)
 	mux.HandleFunc("POST /api/v1/console/guardian-policies", server.handleGuardianPolicyCreate)
+	mux.HandleFunc("GET /api/v1/console/remediation-contracts", server.handleRemediationContractList)
+	mux.HandleFunc("POST /api/v1/console/remediation-contracts", server.handleRemediationContractCreate)
 	mux.HandleFunc("GET /api/v1/console/surfaces", server.handleSurfaceList)
 	mux.HandleFunc("POST /api/v1/console/surfaces", server.handleSurfaceCreate)
 	mux.HandleFunc("GET /api/v1/console/workflows", server.handleWorkflowList)
@@ -644,6 +648,14 @@ func (s *Server) handleGuardianPolicyList(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleGuardianPolicyCreate(w http.ResponseWriter, r *http.Request) {
 	s.handleManifestCreate(w, r, "guardian_policy")
+}
+
+func (s *Server) handleRemediationContractList(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestList(w, r, "remediation_contract")
+}
+
+func (s *Server) handleRemediationContractCreate(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestCreate(w, r, "remediation_contract")
 }
 
 func (s *Server) handleSurfaceCreate(w http.ResponseWriter, r *http.Request) {
