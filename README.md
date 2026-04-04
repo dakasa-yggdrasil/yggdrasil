@@ -186,6 +186,9 @@ Repository configuration:
 - `YGGDRASIL_COMPONENT_NAME` variable: optional, defaults to the repository name
 - `YGGDRASIL_DEPLOY_ENVIRONMENT` variable: optional, defaults to `production`
 
+For the exact repository-by-repository checklist used across the official org,
+see [`docs/github-dogfooding-checklist.md`](/Users/dakasa/projects/yggdrasil/docs/github-dogfooding-checklist.md).
+
 Valide também os artefatos de produção:
 
 ```bash
