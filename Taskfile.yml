@@ -85,6 +85,12 @@ tasks:
       - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/docker-compose.sh restart yggdrasil-core yggdrasil-auth-surface yggdrasil-console
       - ./scripts/smoke.sh
 
+  heimdall:smoke:
+    desc: Validate Heimdall escalation workflow dispatches against a local GitHub mock
+    deps: [up]
+    cmds:
+      - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/heimdall-escalation-smoke.sh
+
   install:smoke:
     desc: Validate installation-manager flows against real remote repositories in an isolated workspace
     cmds:

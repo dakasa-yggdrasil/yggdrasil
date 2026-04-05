@@ -1702,8 +1702,8 @@ func executeHeimdallWorkflowDispatch(
 		return fmt.Errorf("repository binding %s disables workflow dispatch", binding.Spec.Repository)
 	}
 
-	workflow := firstNonEmpty(anyString(action["workflow"]), binding.Spec.DeployWorkflow, defaultHeimdallDispatchWorkflow)
-	ref := firstNonEmpty(anyString(action["ref"]), binding.Spec.DefaultBranch, defaultHeimdallDispatchBranch)
+	workflow := firstNonEmpty(heimdallWorkflowNameFromAction(action), binding.Spec.DeployWorkflow, defaultHeimdallDispatchWorkflow)
+	ref := firstNonEmpty(heimdallWorkflowRefFromAction(action), binding.Spec.DefaultBranch, defaultHeimdallDispatchBranch)
 	repositoryName := firstNonEmpty(anyString(action["repository"]), binding.Spec.Repository)
 	inputs := heimdallBuildWorkflowInputs(action, binding.Spec, source, nil)
 
@@ -2399,6 +2399,24 @@ func heimdallWorkflowInputsFromAction(action map[string]any) map[string]any {
 	default:
 		return nil
 	}
+}
+
+func heimdallWorkflowNameFromAction(action map[string]any) string {
+	if workflow, ok := action["workflow"].(map[string]any); ok {
+		if value := firstNonEmpty(anyString(workflow["workflow"]), anyString(workflow["name"])); value != "" {
+			return value
+		}
+	}
+	return firstNonEmpty(anyString(action["workflow_name"]), anyString(action["workflow"]))
+}
+
+func heimdallWorkflowRefFromAction(action map[string]any) string {
+	if workflow, ok := action["workflow"].(map[string]any); ok {
+		if value := anyString(workflow["ref"]); value != "" {
+			return value
+		}
+	}
+	return anyString(action["ref"])
 }
 
 func heimdallActionPayload(action map[string]any) string {

@@ -84,6 +84,79 @@ func TestResolveSecretRefReturnsSingleValue(t *testing.T) {
 	}
 }
 
+func TestResolveSecretObjectRefReturnsObjectForSingleKeySecret(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New error: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC()
+	rows := sqlmock.NewRows([]string{
+		"id",
+		"namespace",
+		"name",
+		"status",
+		"version",
+		"data",
+		"metadata",
+		"rotation",
+		"last_rotated_at",
+		"expires_at",
+		"created_at",
+		"updated_at",
+	}).AddRow(
+		uuid.New(),
+		"github",
+		"caller",
+		"active",
+		1,
+		[]byte(`{"token":"ghp_123"}`),
+		[]byte(`{}`),
+		[]byte(`{"mode":"manual"}`),
+		now,
+		nil,
+		now,
+		now,
+	)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			SELECT
+				id,
+				namespace,
+				name,
+				status,
+				version,
+				data,
+				metadata,
+				rotation,
+				last_rotated_at,
+				expires_at,
+				created_at,
+				updated_at
+			FROM public.managed_secrets
+			WHERE namespace = $1
+				AND name = $2
+		`)).
+		WithArgs("github", "caller").
+		WillReturnRows(rows)
+
+	value, err := ResolveSecretObjectRef(context.Background(), db, "secret://github/caller")
+	if err != nil {
+		t.Fatalf("ResolveSecretObjectRef error: %v", err)
+	}
+
+	if value["token"] != "ghp_123" {
+		t.Fatalf("expected token object, got %#v", value)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestResolveSecretRefsResolvesNestedReferences(t *testing.T) {
 	t.Parallel()
 

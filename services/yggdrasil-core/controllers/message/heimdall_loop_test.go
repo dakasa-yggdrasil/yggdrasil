@@ -169,6 +169,107 @@ func TestHeimdallBuildWorkflowInputsIncludesRemediationFields(t *testing.T) {
 	}
 }
 
+func TestHeimdallEscalationWorkflowActionUsesIssueWorkflowBelowPostmortemThreshold(t *testing.T) {
+	action, ok := heimdallEscalationWorkflowAction(
+		map[string]any{
+			"type":              "dispatch_workflow",
+			"component_kind":    "product",
+			"component_name":    "yggdrasil",
+			"incident_severity": "high",
+			"incident_title":    "Smoke issue escalation",
+			"incident_category": "oom_killed",
+		},
+		model.GuardianPolicyManifestSpec{
+			Escalation: model.GuardianEscalationPolicySpec{
+				IssueWorkflow:               "incident-escalation.yml",
+				PostmortemWorkflow:          "postmortem.yml",
+				PostmortemSeverityThreshold: "critical",
+				Ref:                         "main",
+			},
+		},
+	)
+	if !ok {
+		t.Fatal("expected escalation workflow action to be generated")
+	}
+
+	workflow, _ := action["workflow"].(map[string]any)
+	if got := anyString(workflow["workflow"]); got != "incident-escalation.yml" {
+		t.Fatalf("workflow = %q, want incident-escalation.yml", got)
+	}
+	inputs, _ := workflow["inputs"].(map[string]any)
+	if got := anyString(inputs["escalation_kind"]); got != "issue" {
+		t.Fatalf("escalation_kind = %q, want issue", got)
+	}
+	if got := anyString(inputs["incident_severity"]); got != "high" {
+		t.Fatalf("incident_severity = %q, want high", got)
+	}
+	if got, _ := inputs["postmortem_required"].(bool); got {
+		t.Fatalf("postmortem_required = %v, want false", got)
+	}
+}
+
+func TestHeimdallEscalationWorkflowActionUsesPostmortemWorkflowAtThreshold(t *testing.T) {
+	action, ok := heimdallEscalationWorkflowAction(
+		map[string]any{
+			"type":              "dispatch_workflow",
+			"component_kind":    "product",
+			"component_name":    "yggdrasil",
+			"incident_severity": "critical",
+			"incident_title":    "Smoke postmortem escalation",
+			"incident_category": "oom_killed",
+		},
+		model.GuardianPolicyManifestSpec{
+			Escalation: model.GuardianEscalationPolicySpec{
+				IssueWorkflow:               "incident-escalation.yml",
+				PostmortemWorkflow:          "postmortem.yml",
+				PostmortemSeverityThreshold: "critical",
+				Ref:                         "main",
+			},
+		},
+	)
+	if !ok {
+		t.Fatal("expected escalation workflow action to be generated")
+	}
+
+	workflow, _ := action["workflow"].(map[string]any)
+	if got := anyString(workflow["workflow"]); got != "postmortem.yml" {
+		t.Fatalf("workflow = %q, want postmortem.yml", got)
+	}
+	inputs, _ := workflow["inputs"].(map[string]any)
+	if got := anyString(inputs["escalation_kind"]); got != "postmortem" {
+		t.Fatalf("escalation_kind = %q, want postmortem", got)
+	}
+	if got := anyString(inputs["incident_severity"]); got != "critical" {
+		t.Fatalf("incident_severity = %q, want critical", got)
+	}
+	if got, _ := inputs["postmortem_required"].(bool); !got {
+		t.Fatalf("postmortem_required = %v, want true", got)
+	}
+}
+
+func TestHeimdallWorkflowNameAndRefFromActionMap(t *testing.T) {
+	action := map[string]any{
+		"workflow": map[string]any{
+			"workflow": "incident-escalation.yml",
+			"ref":      "main",
+			"inputs": map[string]any{
+				"incident_title": "Smoke issue escalation",
+			},
+		},
+	}
+
+	if got := heimdallWorkflowNameFromAction(action); got != "incident-escalation.yml" {
+		t.Fatalf("workflow name = %q, want incident-escalation.yml", got)
+	}
+	if got := heimdallWorkflowRefFromAction(action); got != "main" {
+		t.Fatalf("workflow ref = %q, want main", got)
+	}
+	inputs := heimdallWorkflowInputsFromAction(action)
+	if got := anyString(inputs["incident_title"]); got != "Smoke issue escalation" {
+		t.Fatalf("incident_title = %q, want Smoke issue escalation", got)
+	}
+}
+
 func TestHeimdallEvaluateMemoryObservationTracksRecoveryTimingAndStability(t *testing.T) {
 	now := time.Now().UTC()
 	spec := model.GuardianMemoryManifestSpec{

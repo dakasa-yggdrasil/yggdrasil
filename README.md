@@ -149,6 +149,7 @@ Rode o smoke end-to-end do produto:
 
 ```bash
 task smoke
+task heimdall:smoke
 task install:smoke
 ```
 
@@ -157,6 +158,14 @@ instala todo o catálogo remoto de integrations, valida o compose agregado, sobe
 um subconjunto representativo de runtime dentro do monorepo e fecha com o smoke
 end-to-end de `core + auth + console`, incluindo leituras e escritas mínimas
 pela entrada `/api` do console.
+
+`task heimdall:smoke` valida a rota operacional do Heimdall sem tocar GitHub
+real: ele sobe um mock de API GitHub na rede Docker, reconfigura temporariamente
+o `github-caller`, força um caso de incident escalation e outro de postmortem,
+e confirma que o core despacha `incident-escalation.yml` e `postmortem.yml` com
+os inputs corretos. Se `integration-github` não estiver instalada no monorepo,
+o smoke sobe um runtime temporário a partir do catálogo remoto só para essa
+validação.
 
 ## Dogfooding workflows
 

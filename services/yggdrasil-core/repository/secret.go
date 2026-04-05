@@ -381,6 +381,39 @@ func ResolveSecretRef(ctx context.Context, db *sql.DB, ref string) (any, error) 
 	return output, nil
 }
 
+// ResolveSecretObjectRef resolves one secret:// reference into an object map.
+// Unlike ResolveSecretRef, this never collapses single-key secrets into a
+// scalar when the reference targets the whole secret.
+func ResolveSecretObjectRef(ctx context.Context, db *sql.DB, ref string) (map[string]any, error) {
+	namespace, name, key, err := parseSecretRef(ref)
+	if err != nil {
+		return nil, err
+	}
+	if key != "" {
+		return nil, fmt.Errorf("secret object ref %q must not target an individual key", ref)
+	}
+
+	secret, err := GetManagedSecret(ctx, db, model.GetManagedSecretRequest{
+		Namespace: namespace,
+		Name:      name,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if strings.ToLower(strings.TrimSpace(secret.Status)) != "active" {
+		return nil, fmt.Errorf("secret %s/%s is not active", secret.Namespace, secret.Name)
+	}
+	if secret.IsExpired(time.Now().UTC()) {
+		return nil, fmt.Errorf("secret %s/%s is expired", secret.Namespace, secret.Name)
+	}
+
+	output := make(map[string]any, len(secret.Data))
+	for itemKey, value := range secret.Data {
+		output[itemKey] = value
+	}
+	return output, nil
+}
+
 // ResolveSecretRefs recursively resolves secret:// references from arbitrary input.
 func ResolveSecretRefs(ctx context.Context, db *sql.DB, input any) (any, error) {
 	switch value := input.(type) {

@@ -740,8 +740,8 @@ func (s *Server) handleGuardianApprovalDecision(w http.ResponseWriter, r *http.R
 	updatedManifest, err := createManifestVersion(r.Context(), s.db, model.ManifestDocument{
 		APIVersion: manifestRecord.APIVersion,
 		Kind:       manifestRecord.Kind,
-		Metadata: guardianApprovalMetadataInput(manifestRecord, spec.Status),
-		Spec: specRaw,
+		Metadata:   guardianApprovalMetadataInput(manifestRecord, spec.Status),
+		Spec:       specRaw,
 	})
 	if err != nil {
 		writeMappedError(w, err)
@@ -1330,23 +1330,11 @@ func hydrateIntegrationInstanceInputSecrets(ctx context.Context, db *sql.DB, spe
 	}
 
 	if strings.TrimSpace(spec.CredentialsRef) != "" {
-		value, err := repository.ResolveSecretRef(ctx, db, spec.CredentialsRef)
+		value, err := repository.ResolveSecretObjectRef(ctx, db, spec.CredentialsRef)
 		if err != nil {
 			return fmt.Errorf("resolve integration instance credentials_ref: %w", err)
 		}
-		switch typed := value.(type) {
-		case map[string]any:
-			spec.Credentials = mergeStringAnyMaps(spec.Credentials, typed)
-		case map[string]string:
-			if spec.Credentials == nil {
-				spec.Credentials = map[string]any{}
-			}
-			for key, item := range typed {
-				spec.Credentials[key] = item
-			}
-		default:
-			return fmt.Errorf("integration instance credentials_ref must resolve to an object")
-		}
+		spec.Credentials = mergeStringAnyMaps(spec.Credentials, value)
 	}
 
 	if len(spec.Credentials) > 0 {
