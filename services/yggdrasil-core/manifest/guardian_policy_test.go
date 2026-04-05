@@ -94,6 +94,23 @@ func guardianPolicyFixture() model.GuardianPolicyManifestSpec {
 				},
 			},
 		},
+		MaintenanceMode: model.GuardianMaintenanceModePolicySpec{
+			Enabled:      true,
+			Environments: []string{"production"},
+			Reason:       "Planned maintenance.",
+		},
+		Escalation: model.GuardianEscalationPolicySpec{
+			Enabled:                     true,
+			SeverityThreshold:           "critical",
+			MaxAutoHealAttempts:         2,
+			CreateApproval:              true,
+			DispatchWorkflow:            true,
+			IssueWorkflow:               "incident-escalation.yml",
+			PostmortemWorkflow:          "postmortem.yml",
+			Ref:                         "main",
+			PostmortemSeverityThreshold: "critical",
+			Environments:                []string{"production"},
+		},
 	}
 }
 
@@ -122,5 +139,25 @@ func TestValidateGuardianPolicySpecRejectsInvalidFreezeWindow(t *testing.T) {
 
 	if err := ValidateGuardianPolicySpec(spec); err == nil {
 		t.Fatal("expected invalid freeze window ordering to fail validation")
+	}
+}
+
+func TestValidateGuardianPolicySpecRejectsEmptyMaintenanceEnvironments(t *testing.T) {
+	spec := guardianPolicyFixture()
+	spec.MaintenanceMode.Environments = nil
+
+	if err := ValidateGuardianPolicySpec(spec); err == nil {
+		t.Fatal("expected maintenance_mode without environments to fail validation")
+	}
+}
+
+func TestValidateGuardianPolicySpecRejectsEscalationDispatchWithoutWorkflow(t *testing.T) {
+	spec := guardianPolicyFixture()
+	spec.Escalation.DispatchWorkflow = true
+	spec.Escalation.IssueWorkflow = ""
+	spec.Escalation.PostmortemWorkflow = ""
+
+	if err := ValidateGuardianPolicySpec(spec); err == nil {
+		t.Fatal("expected escalation dispatch without workflow to fail validation")
 	}
 }

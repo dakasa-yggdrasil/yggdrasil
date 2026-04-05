@@ -6,6 +6,8 @@ type GuardianPolicyManifestSpec struct {
 	Scope                string                                 `json:"scope,omitempty"`
 	AutoHeal             GuardianAutoHealPolicySpec             `json:"auto_heal,omitempty"`
 	Autonomy             GuardianAutonomyPolicySpec             `json:"autonomy,omitempty"`
+	MaintenanceMode      GuardianMaintenanceModePolicySpec      `json:"maintenance_mode,omitempty"`
+	Escalation           GuardianEscalationPolicySpec           `json:"escalation,omitempty"`
 	RepositoryAutomation GuardianRepositoryAutomationPolicySpec `json:"repository_automation,omitempty"`
 	CostOptimization     GuardianCostOptimizationPolicySpec     `json:"cost_optimization,omitempty"`
 }
@@ -47,6 +49,30 @@ type GuardianAutonomyPolicySpec struct {
 	ProtectedEnvironments       GuardianProtectedEnvironmentPolicySpec `json:"protected_environments,omitempty"`
 	BusinessHours               GuardianBusinessHoursPolicySpec        `json:"business_hours,omitempty"`
 	FreezeWindows               []GuardianFreezeWindowPolicySpec       `json:"freeze_windows,omitempty"`
+}
+
+// GuardianMaintenanceModePolicySpec blocks or limits autonomous changes during
+// planned maintenance periods outside the scheduled freeze-window model.
+type GuardianMaintenanceModePolicySpec struct {
+	Enabled           bool     `json:"enabled,omitempty"`
+	Environments      []string `json:"environments,omitempty"`
+	Reason            string   `json:"reason,omitempty"`
+	AllowHotfixBypass bool     `json:"allow_hotfix_bypass,omitempty"`
+}
+
+// GuardianEscalationPolicySpec defines when Heimdall should stop trying the
+// same remediation path and escalate to humans or repository automation.
+type GuardianEscalationPolicySpec struct {
+	Enabled                     bool     `json:"enabled,omitempty"`
+	SeverityThreshold           string   `json:"severity_threshold,omitempty"`
+	MaxAutoHealAttempts         int      `json:"max_auto_heal_attempts,omitempty"`
+	CreateApproval              bool     `json:"create_approval,omitempty"`
+	DispatchWorkflow            bool     `json:"dispatch_workflow,omitempty"`
+	IssueWorkflow               string   `json:"issue_workflow,omitempty"`
+	PostmortemWorkflow          string   `json:"postmortem_workflow,omitempty"`
+	Ref                         string   `json:"ref,omitempty"`
+	PostmortemSeverityThreshold string   `json:"postmortem_severity_threshold,omitempty"`
+	Environments                []string `json:"environments,omitempty"`
 }
 
 // GuardianProtectedEnvironmentPolicySpec tightens autonomy for sensitive environments.

@@ -36,6 +36,9 @@ func ValidateGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) error {
 	if !slices.Contains(supportedGuardianAutonomyModes, spec.Autonomy.Mode) {
 		return fmt.Errorf("guardian_policy autonomy mode %q is unsupported", spec.Autonomy.Mode)
 	}
+	if spec.MaintenanceMode.Enabled && len(spec.MaintenanceMode.Environments) == 0 {
+		return fmt.Errorf("guardian_policy maintenance_mode environments must not be empty when enabled")
+	}
 	if !slices.Contains(supportedGuardianSeverityThresholds, spec.Autonomy.HotfixSeverityThreshold) {
 		return fmt.Errorf("guardian_policy autonomy hotfix_severity_threshold %q is unsupported", spec.Autonomy.HotfixSeverityThreshold)
 	}
@@ -96,6 +99,25 @@ func ValidateGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) error {
 		}
 		if !end.After(start) {
 			return fmt.Errorf("guardian_policy autonomy freeze_windows %q requires ends_at after starts_at", window.Name)
+		}
+	}
+	if spec.Escalation.Enabled {
+		if !slices.Contains(supportedGuardianSeverityThresholds, spec.Escalation.SeverityThreshold) {
+			return fmt.Errorf("guardian_policy escalation severity_threshold %q is unsupported", spec.Escalation.SeverityThreshold)
+		}
+		if !slices.Contains(supportedGuardianSeverityThresholds, spec.Escalation.PostmortemSeverityThreshold) {
+			return fmt.Errorf("guardian_policy escalation postmortem_severity_threshold %q is unsupported", spec.Escalation.PostmortemSeverityThreshold)
+		}
+		if spec.Escalation.MaxAutoHealAttempts < 1 {
+			return fmt.Errorf("guardian_policy escalation max_auto_heal_attempts must be >= 1")
+		}
+		if !spec.Escalation.CreateApproval && !spec.Escalation.DispatchWorkflow {
+			return fmt.Errorf("guardian_policy escalation must enable create_approval or dispatch_workflow")
+		}
+		if spec.Escalation.DispatchWorkflow &&
+			strings.TrimSpace(spec.Escalation.IssueWorkflow) == "" &&
+			strings.TrimSpace(spec.Escalation.PostmortemWorkflow) == "" {
+			return fmt.Errorf("guardian_policy escalation dispatch_workflow requires issue_workflow or postmortem_workflow")
 		}
 	}
 	if spec.AutoHeal.MaxActionsPerSweep < 0 {
@@ -201,8 +223,33 @@ func NormalizeGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) model.Gu
 	}
 	spec.Autonomy.FreezeWindows = normalizedFreeze
 
+	spec.MaintenanceMode.Environments = normalizeGuardianEnvironmentList(spec.MaintenanceMode.Environments)
+	spec.MaintenanceMode.Reason = strings.TrimSpace(spec.MaintenanceMode.Reason)
+
 	if spec.CostOptimization.MinEstimatedMonthlySavingsUSD < 0 {
 		spec.CostOptimization.MinEstimatedMonthlySavingsUSD = 0
+	}
+
+	spec.Escalation.SeverityThreshold = strings.ToLower(strings.TrimSpace(spec.Escalation.SeverityThreshold))
+	if spec.Escalation.SeverityThreshold == "" {
+		spec.Escalation.SeverityThreshold = "critical"
+	}
+	spec.Escalation.PostmortemSeverityThreshold = strings.ToLower(strings.TrimSpace(spec.Escalation.PostmortemSeverityThreshold))
+	if spec.Escalation.PostmortemSeverityThreshold == "" {
+		spec.Escalation.PostmortemSeverityThreshold = "critical"
+	}
+	if spec.Escalation.MaxAutoHealAttempts <= 0 {
+		spec.Escalation.MaxAutoHealAttempts = 2
+	}
+	spec.Escalation.IssueWorkflow = strings.TrimSpace(spec.Escalation.IssueWorkflow)
+	spec.Escalation.PostmortemWorkflow = strings.TrimSpace(spec.Escalation.PostmortemWorkflow)
+	spec.Escalation.Ref = strings.TrimSpace(spec.Escalation.Ref)
+	if spec.Escalation.Ref == "" {
+		spec.Escalation.Ref = "main"
+	}
+	spec.Escalation.Environments = normalizeGuardianEnvironmentList(spec.Escalation.Environments)
+	if spec.Escalation.Enabled && !spec.Escalation.CreateApproval && !spec.Escalation.DispatchWorkflow {
+		spec.Escalation.CreateApproval = true
 	}
 	return spec
 }

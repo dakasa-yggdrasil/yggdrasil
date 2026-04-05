@@ -76,9 +76,11 @@ type heimdallAutonomyDecision struct {
 	Mode                 string
 	RequireApproval      bool
 	ManualReview         bool
+	Escalate             bool
 	Confidence           float64
 	ConfidenceBand       string
 	Reason               string
+	EscalationReason     string
 	ProviderGroup        string
 	IncidentCategory     string
 	Attempts             float64
@@ -89,6 +91,8 @@ type heimdallAutonomyDecision struct {
 	OutsideBusinessHours bool
 	ActiveFreezeWindow   string
 	ProtectedEnvironment bool
+	MaintenanceActive    bool
+	MaintenanceReason    string
 }
 
 type heimdallOperationalContext struct {
@@ -102,6 +106,9 @@ type heimdallOperationalContext struct {
 	FreezeReason               string
 	BusinessHoursAllowsBypass  bool
 	FreezeAllowsBypass         bool
+	MaintenanceActive          bool
+	MaintenanceReason          string
+	MaintenanceAllowsBypass    bool
 }
 
 // StartHeimdallGuardianLoop runs the periodic closed-loop guardian sweep.
@@ -414,6 +421,12 @@ func loadGuardianPolicyForInstance(ctx context.Context, db *sql.DB, instanceMani
 			CooldownSeconds:       300,
 			AllowDispatchWorkflow: true,
 			AllowRightsize:        true,
+		},
+		Escalation: model.GuardianEscalationPolicySpec{
+			Enabled:             true,
+			SeverityThreshold:   "critical",
+			MaxAutoHealAttempts: 2,
+			CreateApproval:      true,
 		},
 		CostOptimization: model.GuardianCostOptimizationPolicySpec{
 			Enabled: false,
@@ -977,6 +990,10 @@ func executeHeimdallActionWithOptions(
 		options.Decision = decision
 	}
 
+	if decision.Escalate {
+		return executeHeimdallEscalation(ctx, conn, db, action, repositoryBindings, policy, source, options)
+	}
+
 	if !options.SkipApproval && decision.RequireApproval {
 		return createHeimdallApprovalRequest(ctx, db, action, policy, source, *decision)
 	}
@@ -1007,6 +1024,8 @@ func executeHeimdallActionWithOptions(
 			return fmt.Errorf("heimdall guardian policy blocks rotate_secret actions")
 		}
 		err = executeHeimdallSecretRotation(ctx, db, action)
+	case "page_team":
+		err = executeHeimdallHumanEscalation(ctx, db, action, policy, source, options)
 	default:
 		err = fmt.Errorf("heimdall action type %q is not executable by the core loop", actionType)
 	}
@@ -1125,9 +1144,17 @@ func heimdallDecisionFromAssessmentAt(
 		OutsideBusinessHours: operational.OutsideBusinessHours,
 		ActiveFreezeWindow:   operational.ActiveFreezeWindow,
 		ProtectedEnvironment: operational.ProtectedEnvironment,
+		MaintenanceActive:    operational.MaintenanceActive,
+		MaintenanceReason:    operational.MaintenanceReason,
 	}
 	autoExecuteAllowed := heimdallBlastRadiusWithinLimit(blastRadius, operational.EffectiveAutoBlastRadius)
 	hotfixBypassAllowed := heimdallBlastRadiusWithinLimit(blastRadius, operational.EffectiveBypassBlastRadius)
+	if operational.MaintenanceActive {
+		autoExecuteAllowed = false
+		if !operational.MaintenanceAllowsBypass {
+			hotfixBypassAllowed = false
+		}
+	}
 	if operational.OutsideBusinessHours {
 		autoExecuteAllowed = false
 		if !operational.BusinessHoursAllowsBypass {
@@ -1139,6 +1166,14 @@ func heimdallDecisionFromAssessmentAt(
 		if !operational.FreezeAllowsBypass {
 			hotfixBypassAllowed = false
 		}
+	}
+	if shouldEscalate, reason := heimdallShouldEscalateAction(action, policy, source, assessment, operational); shouldEscalate {
+		decision.Escalate = true
+		decision.ConfidenceBand = "escalation"
+		decision.EscalationReason = reason
+		decision.Reason = heimdallAppendOperationalReason(reason, operational)
+		decision.ManualReview = policy.Escalation.CreateApproval
+		return decision
 	}
 
 	if policy.Autonomy.Mode == "approval_required" {
@@ -1235,6 +1270,45 @@ func heimdallConfidenceBand(policy model.GuardianPolicyManifestSpec, confidence 
 	default:
 		return "approval"
 	}
+}
+
+func heimdallShouldEscalateAction(
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+	assessment heimdallActionConfidenceAssessment,
+	operational heimdallOperationalContext,
+) (bool, string) {
+	if !policy.Escalation.Enabled {
+		return false, ""
+	}
+	if !heimdallEnvironmentMatches(operational.Environment, policy.Escalation.Environments) {
+		return false, ""
+	}
+
+	incident := heimdallIncidentFromAction(action)
+	severity := firstNonEmpty(anyString(incident["severity"]), anyString(action["incident_severity"]), "critical")
+	if !heimdallSeverityMeetsThreshold(severity, policy.Escalation.SeverityThreshold) {
+		return false, ""
+	}
+
+	if operational.MaintenanceActive && source == "critical_auto_remediation" {
+		return true, "maintenance mode is active, so Heimdall will stop healing and escalate this incident"
+	}
+
+	if source != "critical_auto_remediation" {
+		return false, ""
+	}
+	if assessment.Attempts >= float64(policy.Escalation.MaxAutoHealAttempts) {
+		recoveryRate := math.Round(assessment.RecoveryRate*100) / 100
+		return true, fmt.Sprintf(
+			"automatic remediation already tried this playbook %.0f times with recovery rate %.2f, so Heimdall is escalating",
+			assessment.Attempts,
+			recoveryRate,
+		)
+	}
+
+	return false, ""
 }
 
 func heimdallResolveActionBlastRadius(action map[string]any) (string, string) {
@@ -1335,6 +1409,7 @@ func heimdallResolveOperationalContext(
 		EffectiveAutoBlastRadius:   policy.Autonomy.MaxAutoExecuteBlastRadius,
 		EffectiveBypassBlastRadius: policy.Autonomy.MaxBypassHotfixBlastRadius,
 		BusinessHoursAllowsBypass:  policy.Autonomy.BusinessHours.AllowHotfixBypass,
+		MaintenanceAllowsBypass:    policy.MaintenanceMode.AllowHotfixBypass,
 	}
 	if heimdallEnvironmentMatches(environment, policy.Autonomy.ProtectedEnvironments.Environments) {
 		context.ProtectedEnvironment = true
@@ -1348,6 +1423,10 @@ func heimdallResolveOperationalContext(
 		context.ActiveFreezeWindow = active
 		context.FreezeReason = reason
 		context.FreezeAllowsBypass = allowBypass
+	}
+	if policy.MaintenanceMode.Enabled && heimdallEnvironmentMatches(environment, policy.MaintenanceMode.Environments) {
+		context.MaintenanceActive = true
+		context.MaintenanceReason = firstNonEmpty(policy.MaintenanceMode.Reason, "Maintenance mode is active for this environment.")
 	}
 	if context.EffectiveAutoBlastRadius == "" {
 		context.EffectiveAutoBlastRadius = policy.Autonomy.MaxAutoExecuteBlastRadius
@@ -1373,6 +1452,13 @@ func heimdallAppendOperationalReason(reason string, context heimdallOperationalC
 			reason = fmt.Sprintf("%s %s", strings.TrimSpace(reason), context.FreezeReason)
 		} else {
 			reason = fmt.Sprintf("%s Freeze window %q is active.", strings.TrimSpace(reason), context.ActiveFreezeWindow)
+		}
+	}
+	if context.MaintenanceActive {
+		if context.MaintenanceReason != "" {
+			reason = fmt.Sprintf("%s %s", strings.TrimSpace(reason), context.MaintenanceReason)
+		} else {
+			reason = fmt.Sprintf("%s Maintenance mode is active.", strings.TrimSpace(reason))
 		}
 	}
 	return strings.TrimSpace(reason)
@@ -1528,6 +1614,9 @@ func createHeimdallApprovalRequest(
 	if decision.ManualReview {
 		summary = fmt.Sprintf("%s Manual review recommended.", summary)
 	}
+	if decision.Escalate {
+		summary = fmt.Sprintf("%s Escalation requested.", summary)
+	}
 
 	spec := manifestengine.NormalizeGuardianApprovalSpec(model.GuardianApprovalManifestSpec{
 		GuardianRef: policy.GuardianRef,
@@ -1542,6 +1631,8 @@ func createHeimdallApprovalRequest(
 			"confidence":         round2(decision.Confidence),
 			"confidence_band":    decision.ConfidenceBand,
 			"confidence_reason":  decision.Reason,
+			"escalate":           decision.Escalate,
+			"escalation_reason":  decision.EscalationReason,
 			"manual_review":      decision.ManualReview,
 			"blast_radius":       decision.BlastRadius,
 			"blast_reason":       decision.BlastRadiusReason,
@@ -1650,6 +1741,94 @@ func executeHeimdallWorkflowDispatch(
 		markHeimdallActionCooldown(action, binding.Spec)
 	}
 	return nil
+}
+
+func executeHeimdallEscalation(
+	ctx context.Context,
+	conn *amqp.Connection,
+	db *sql.DB,
+	action map[string]any,
+	repositoryBindings map[string]heimdallRepositoryBinding,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+	options heimdallExecutionOptions,
+) error {
+	decision := options.Decision
+	if decision == nil {
+		resolved, err := heimdallResolveAutonomyDecision(ctx, db, action, policy, source)
+		if err != nil {
+			return err
+		}
+		decision = &resolved
+	}
+
+	var firstErr error
+	if policy.Escalation.CreateApproval {
+		escalationDecision := *decision
+		escalationDecision.RequireApproval = true
+		escalationDecision.ManualReview = true
+		escalationDecision.ConfidenceBand = "manual_review"
+		if strings.TrimSpace(escalationDecision.Reason) == "" {
+			escalationDecision.Reason = "Heimdall escalated this incident for human review."
+		}
+		if err := createHeimdallApprovalRequest(ctx, db, action, policy, firstNonEmpty(source, "incident_escalation"), escalationDecision); err != nil {
+			firstErr = err
+		}
+	}
+
+	if policy.Escalation.DispatchWorkflow {
+		escalationAction, ok := heimdallEscalationWorkflowAction(action, policy)
+		if ok {
+			dispatchOptions := options
+			dispatchOptions.SkipApproval = true
+			dispatchOptions.SkipCooldown = true
+			dispatchOptions.MemoryName = ""
+			dispatchOptions.MemoryNS = ""
+			if err := executeHeimdallWorkflowDispatch(
+				ctx,
+				conn,
+				db,
+				escalationAction,
+				repositoryBindings,
+				policy,
+				"incident_escalation",
+				dispatchOptions,
+			); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+
+	return firstErr
+}
+
+func executeHeimdallHumanEscalation(
+	ctx context.Context,
+	db *sql.DB,
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+	options heimdallExecutionOptions,
+) error {
+	decision := options.Decision
+	if decision == nil {
+		fallback := heimdallAutonomyDecision{
+			Mode:            policy.Autonomy.Mode,
+			RequireApproval: true,
+			ManualReview:    true,
+			ConfidenceBand:  "manual_review",
+			Reason:          "Heimdall requested human escalation for this incident.",
+		}
+		decision = &fallback
+	}
+	forced := *decision
+	forced.RequireApproval = true
+	forced.ManualReview = true
+	forced.ConfidenceBand = "manual_review"
+	if strings.TrimSpace(forced.Reason) == "" {
+		forced.Reason = "Heimdall requested human escalation for this incident."
+	}
+	return createHeimdallApprovalRequest(ctx, db, action, policy, firstNonEmpty(source, "incident_escalation"), forced)
 }
 
 func executeHeimdallContractAction(
@@ -2164,6 +2343,45 @@ func heimdallBuildWorkflowInputs(
 	return inputs
 }
 
+func heimdallEscalationWorkflowAction(
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+) (map[string]any, bool) {
+	incident := heimdallIncidentFromAction(action)
+	severity := firstNonEmpty(anyString(incident["severity"]), anyString(action["incident_severity"]), "critical")
+	workflow := strings.TrimSpace(policy.Escalation.IssueWorkflow)
+	escalationKind := "issue"
+	if heimdallSeverityMeetsThreshold(severity, policy.Escalation.PostmortemSeverityThreshold) &&
+		strings.TrimSpace(policy.Escalation.PostmortemWorkflow) != "" {
+		workflow = strings.TrimSpace(policy.Escalation.PostmortemWorkflow)
+		escalationKind = "postmortem"
+	}
+	if workflow == "" {
+		return nil, false
+	}
+
+	next := cloneAuthorizationInput(action)
+	next["type"] = "dispatch_workflow"
+	next["description"] = firstNonEmpty(anyString(action["description"]), fmt.Sprintf("Heimdall escalation (%s) for %s", escalationKind, firstNonEmpty(anyString(incident["title"]), "incident")))
+	next["reason"] = firstNonEmpty(anyString(action["reason"]), "Heimdall escalated this incident after reaching a policy boundary.")
+	next["incident"] = mergeStringAnyMaps(incident, map[string]any{
+		"escalation_kind": escalationKind,
+	})
+	next["workflow"] = map[string]any{
+		"workflow": workflow,
+		"ref":      firstNonEmpty(strings.TrimSpace(policy.Escalation.Ref), defaultHeimdallDispatchBranch),
+		"inputs": map[string]any{
+			"escalation_kind":     escalationKind,
+			"escalation_reason":   firstNonEmpty(anyString(action["reason"]), anyString(action["description"]), "Heimdall escalation"),
+			"incident_severity":   severity,
+			"incident_title":      firstNonEmpty(anyString(incident["title"]), anyString(action["incident_title"])),
+			"incident_category":   firstNonEmpty(anyString(incident["category"]), anyString(action["incident_category"])),
+			"postmortem_required": escalationKind == "postmortem",
+		},
+	}
+	return next, true
+}
+
 func heimdallWorkflowInputsFromAction(action map[string]any) map[string]any {
 	workflow, ok := action["workflow"].(map[string]any)
 	if !ok {
@@ -2324,12 +2542,16 @@ func heimdallDecisionMetadata(decision heimdallAutonomyDecision) map[string]any 
 		"confidence":             round2(decision.Confidence),
 		"confidence_band":        strings.TrimSpace(decision.ConfidenceBand),
 		"confidence_reason":      strings.TrimSpace(decision.Reason),
+		"escalate":               decision.Escalate,
+		"escalation_reason":      strings.TrimSpace(decision.EscalationReason),
 		"manual_review":          decision.ManualReview,
 		"blast_radius":           strings.TrimSpace(decision.BlastRadius),
 		"blast_reason":           strings.TrimSpace(decision.BlastRadiusReason),
 		"environment":            strings.TrimSpace(decision.Environment),
 		"outside_business_hours": decision.OutsideBusinessHours,
 		"freeze_window":          strings.TrimSpace(decision.ActiveFreezeWindow),
+		"maintenance_active":     decision.MaintenanceActive,
+		"maintenance_reason":     strings.TrimSpace(decision.MaintenanceReason),
 		"protected_environment":  decision.ProtectedEnvironment,
 		"provider_group":         strings.TrimSpace(decision.ProviderGroup),
 		"incident_category":      strings.TrimSpace(decision.IncidentCategory),
@@ -3166,6 +3388,24 @@ func heimdallPolicyInput(policy model.GuardianPolicyManifestSpec) map[string]any
 			"enabled":                           policy.CostOptimization.Enabled,
 			"min_estimated_monthly_savings_usd": policy.CostOptimization.MinEstimatedMonthlySavingsUSD,
 			"allow_rightsize":                   policy.CostOptimization.AllowRightsize,
+		},
+		"maintenance_mode": map[string]any{
+			"enabled":             policy.MaintenanceMode.Enabled,
+			"environments":        cloneStringSlice(policy.MaintenanceMode.Environments),
+			"reason":              policy.MaintenanceMode.Reason,
+			"allow_hotfix_bypass": policy.MaintenanceMode.AllowHotfixBypass,
+		},
+		"escalation": map[string]any{
+			"enabled":                       policy.Escalation.Enabled,
+			"severity_threshold":            policy.Escalation.SeverityThreshold,
+			"max_auto_heal_attempts":        policy.Escalation.MaxAutoHealAttempts,
+			"create_approval":               policy.Escalation.CreateApproval,
+			"dispatch_workflow":             policy.Escalation.DispatchWorkflow,
+			"issue_workflow":                policy.Escalation.IssueWorkflow,
+			"postmortem_workflow":           policy.Escalation.PostmortemWorkflow,
+			"ref":                           policy.Escalation.Ref,
+			"postmortem_severity_threshold": policy.Escalation.PostmortemSeverityThreshold,
+			"environments":                  cloneStringSlice(policy.Escalation.Environments),
 		},
 		"autonomy": map[string]any{
 			"mode":                           policy.Autonomy.Mode,

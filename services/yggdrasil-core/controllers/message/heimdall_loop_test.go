@@ -488,3 +488,96 @@ func TestHeimdallDecisionFromAssessmentBlocksDuringFreezeWindow(t *testing.T) {
 		t.Fatalf("freeze window = %q, want release-freeze", decision.ActiveFreezeWindow)
 	}
 }
+
+func TestHeimdallDecisionFromAssessmentEscalatesDuringMaintenanceMode(t *testing.T) {
+	decision := heimdallDecisionFromAssessmentAt(
+		map[string]any{
+			"type":              "rightsize_component",
+			"incident_severity": "critical",
+			"blast_radius":      "medium",
+			"environment":       "production",
+		},
+		model.GuardianPolicyManifestSpec{
+			Autonomy: model.GuardianAutonomyPolicySpec{
+				Mode:                        "policy_bound",
+				AutoExecuteMinConfidence:    0.7,
+				ManualReviewBelowConfidence: 0.25,
+				MaxAutoExecuteBlastRadius:   "medium",
+				MaxBypassHotfixBlastRadius:  "high",
+			},
+			MaintenanceMode: model.GuardianMaintenanceModePolicySpec{
+				Enabled:      true,
+				Environments: []string{"production"},
+				Reason:       "Maintenance mode is active for a database migration.",
+			},
+			Escalation: model.GuardianEscalationPolicySpec{
+				Enabled:             true,
+				SeverityThreshold:   "critical",
+				MaxAutoHealAttempts: 2,
+				CreateApproval:      true,
+			},
+		},
+		"critical_auto_remediation",
+		heimdallActionConfidenceAssessment{
+			Confidence:       0.92,
+			BlastRadius:      "medium",
+			Environment:      "production",
+			ProviderGroup:    "kubernetes",
+			IncidentCategory: "capacity",
+			Attempts:         1,
+			RecoveryRate:     1,
+		},
+		time.Date(2026, time.April, 6, 14, 0, 0, 0, time.UTC),
+	)
+
+	if !decision.Escalate {
+		t.Fatal("expected maintenance mode to trigger escalation")
+	}
+	if !decision.MaintenanceActive {
+		t.Fatal("expected maintenance mode to be reflected in the decision")
+	}
+	if decision.ConfidenceBand != "escalation" {
+		t.Fatalf("confidence band = %q, want escalation", decision.ConfidenceBand)
+	}
+}
+
+func TestHeimdallDecisionFromAssessmentEscalatesAfterRepeatedFailures(t *testing.T) {
+	decision := heimdallDecisionFromAssessment(
+		map[string]any{
+			"type":              "dispatch_workflow",
+			"incident_severity": "critical",
+			"blast_radius":      "medium",
+		},
+		model.GuardianPolicyManifestSpec{
+			Autonomy: model.GuardianAutonomyPolicySpec{
+				Mode:                        "policy_bound",
+				AutoExecuteMinConfidence:    0.7,
+				ManualReviewBelowConfidence: 0.25,
+				MaxAutoExecuteBlastRadius:   "medium",
+				MaxBypassHotfixBlastRadius:  "high",
+			},
+			Escalation: model.GuardianEscalationPolicySpec{
+				Enabled:             true,
+				SeverityThreshold:   "critical",
+				MaxAutoHealAttempts: 2,
+				CreateApproval:      true,
+			},
+		},
+		"critical_auto_remediation",
+		heimdallActionConfidenceAssessment{
+			Confidence:       0.88,
+			BlastRadius:      "medium",
+			ProviderGroup:    "github",
+			IncidentCategory: "availability",
+			Attempts:         3,
+			RecoveryRate:     0.2,
+		},
+	)
+
+	if !decision.Escalate {
+		t.Fatal("expected repeated failed attempts to escalate")
+	}
+	if decision.EscalationReason == "" {
+		t.Fatal("expected escalation reason to be set")
+	}
+}

@@ -40,6 +40,24 @@
       },
       "freeze_windows": []
     },
+    "maintenance_mode": {
+      "enabled": false,
+      "environments": ["prod", "production"],
+      "reason": "Planned maintenance in progress.",
+      "allow_hotfix_bypass": false
+    },
+    "escalation": {
+      "enabled": true,
+      "severity_threshold": "critical",
+      "max_auto_heal_attempts": 2,
+      "create_approval": true,
+      "dispatch_workflow": false,
+      "issue_workflow": "incident-escalation.yml",
+      "postmortem_workflow": "postmortem.yml",
+      "ref": "main",
+      "postmortem_severity_threshold": "critical",
+      "environments": ["prod", "production"]
+    },
     "auto_heal": {
       "enabled": true,
       "severity_threshold": "critical",
