@@ -112,6 +112,82 @@
           "type": "integer",
           "description": "Maximum bounded right-sizing step Heimdall should suggest in one action.",
           "default": 25
+        },
+        "llm_enabled": {
+          "type": "boolean",
+          "description": "Enable the constrained LLM fallback when lightweight guardian support cannot resolve the incident.",
+          "default": false
+        },
+        "llm_mode": {
+          "type": "string",
+          "description": "LLM operating mode. Supported values are off, fallback, and always.",
+          "default": "fallback"
+        },
+        "llm_provider_order": {
+          "type": "string",
+          "description": "Comma-separated provider order for LLM fallback. Supported values are gpt and claude.",
+          "default": "gpt,claude"
+        },
+        "llm_base_url": {
+          "type": "string",
+          "description": "Legacy OpenAI-compatible base URL used for GPT fallback calls when llm_gpt_base_url is unset.",
+          "default": "https://api.openai.com/v1"
+        },
+        "llm_model": {
+          "type": "string",
+          "description": "Legacy GPT model name used when llm_gpt_model is unset."
+        },
+        "llm_api_key": {
+          "type": "string",
+          "description": "Legacy GPT API key used when llm_gpt_api_key is unset.",
+          "secret": true
+        },
+        "llm_gpt_base_url": {
+          "type": "string",
+          "description": "OpenAI-compatible base URL used for GPT fallback calls.",
+          "default": "https://api.openai.com/v1"
+        },
+        "llm_gpt_model": {
+          "type": "string",
+          "description": "GPT model name used for constrained Heimdall fallback."
+        },
+        "llm_gpt_api_key": {
+          "type": "string",
+          "description": "API key used for GPT fallback calls.",
+          "secret": true
+        },
+        "llm_claude_base_url": {
+          "type": "string",
+          "description": "Anthropic-compatible base URL used for Claude fallback calls.",
+          "default": "https://api.anthropic.com/v1"
+        },
+        "llm_claude_model": {
+          "type": "string",
+          "description": "Claude model name used for constrained Heimdall fallback."
+        },
+        "llm_claude_api_key": {
+          "type": "string",
+          "description": "API key used for Claude fallback calls.",
+          "secret": true
+        },
+        "llm_claude_version": {
+          "type": "string",
+          "description": "Anthropic API version header used for Claude fallback calls.",
+          "default": "2023-06-01"
+        },
+        "llm_system_prompt": {
+          "type": "string",
+          "description": "Optional extra system prompt appended to Heimdall's default constrained instructions."
+        },
+        "llm_timeout_seconds": {
+          "type": "integer",
+          "description": "Timeout used for LLM fallback calls.",
+          "default": 30
+        },
+        "llm_temperature": {
+          "type": "number",
+          "description": "Sampling temperature used for LLM fallback calls.",
+          "default": 0.1
         }
       }
     },
