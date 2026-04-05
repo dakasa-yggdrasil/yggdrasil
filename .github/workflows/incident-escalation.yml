@@ -1,0 +1,180 @@
+name: Incident Escalation
+
+on:
+  workflow_dispatch:
+    inputs:
+      component_kind:
+        description: Ecosystem component kind.
+        required: false
+        default: product
+        type: string
+      component_name:
+        description: Stable ecosystem component name.
+        required: false
+        default: yggdrasil
+        type: string
+      component_namespace:
+        description: Stable ecosystem component namespace.
+        required: false
+        default: global
+        type: string
+      environment:
+        description: Target environment label.
+        required: false
+        default: production
+        type: string
+      incident_title:
+        description: Incident title provided by Heimdall.
+        required: false
+        default: ""
+        type: string
+      incident_category:
+        description: Incident category.
+        required: false
+        default: incident
+        type: string
+      incident_severity:
+        description: Incident severity.
+        required: false
+        default: critical
+        type: string
+      escalation_reason:
+        description: Why Heimdall escalated.
+        required: false
+        default: ""
+        type: string
+      remediation_type:
+        description: Original remediation action type, when any.
+        required: false
+        default: ""
+        type: string
+      remediation_contract:
+        description: Original remediation contract identifier, when any.
+        required: false
+        default: ""
+        type: string
+      remediation_reason:
+        description: Original remediation reason, when any.
+        required: false
+        default: ""
+        type: string
+      source_run_url:
+        description: Source run URL.
+        required: false
+        default: ""
+        type: string
+      source_run_id:
+        description: Source run identifier.
+        required: false
+        default: ""
+        type: string
+      commit_sha:
+        description: Optional source commit SHA.
+        required: false
+        default: ""
+        type: string
+      postmortem_required:
+        description: Whether Heimdall already considers a postmortem required.
+        required: false
+        default: "false"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  escalate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Create or update incident issue
+        id: incident
+        uses: actions/github-script@v7
+        env:
+          COMPONENT_KIND: ${{ inputs.component_kind }}
+          COMPONENT_NAME: ${{ inputs.component_name }}
+          COMPONENT_NAMESPACE: ${{ inputs.component_namespace }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          INCIDENT_TITLE: ${{ inputs.incident_title }}
+          INCIDENT_CATEGORY: ${{ inputs.incident_category }}
+          INCIDENT_SEVERITY: ${{ inputs.incident_severity }}
+          ESCALATION_REASON: ${{ inputs.escalation_reason }}
+          REMEDIATION_TYPE: ${{ inputs.remediation_type }}
+          REMEDIATION_CONTRACT: ${{ inputs.remediation_contract }}
+          REMEDIATION_REASON: ${{ inputs.remediation_reason }}
+          SOURCE_RUN_URL: ${{ inputs.source_run_url }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          POSTMORTEM_REQUIRED: ${{ inputs.postmortem_required }}
+        with:
+          script: |
+            const component = `${process.env.COMPONENT_KIND}:${process.env.COMPONENT_NAMESPACE}:${process.env.COMPONENT_NAME}`;
+            const severity = (process.env.INCIDENT_SEVERITY || 'critical').trim().toLowerCase();
+            const category = (process.env.INCIDENT_CATEGORY || 'incident').trim().toLowerCase();
+            const incidentTitle = (process.env.INCIDENT_TITLE || `${component} incident`).trim();
+            const title = `Heimdall incident [${severity}] ${component}: ${incidentTitle}`;
+            const summaryLines = [
+              '## Heimdall incident escalation',
+              '',
+              `- Component: \`${component}\``,
+              `- Environment: \`${process.env.ENVIRONMENT || 'production'}\``,
+              `- Severity: \`${severity}\``,
+              `- Category: \`${category}\``,
+              `- Escalation reason: ${process.env.ESCALATION_REASON || 'No explicit escalation reason was provided.'}`,
+              `- Remediation type: \`${process.env.REMEDIATION_TYPE || 'n/a'}\``,
+              `- Remediation contract: \`${process.env.REMEDIATION_CONTRACT || 'n/a'}\``,
+              `- Remediation reason: ${process.env.REMEDIATION_REASON || 'n/a'}`,
+              `- Source run ID: \`${process.env.SOURCE_RUN_ID || 'n/a'}\``,
+              `- Source SHA: \`${process.env.COMMIT_SHA || 'n/a'}\``,
+              `- Postmortem required: \`${process.env.POSTMORTEM_REQUIRED || 'false'}\``,
+            ];
+            if (process.env.SOURCE_RUN_URL) {
+              summaryLines.push(`- Source run URL: ${process.env.SOURCE_RUN_URL}`);
+            }
+            summaryLines.push('', '## Next actions', '', '- Confirm impact and current status.', '- Decide whether to execute a manual remediation or rollback.', '- Update this issue with timeline and owner.');
+            const body = summaryLines.join('\n');
+
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = openIssues.find((issue) => !issue.pull_request && issue.title === title);
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Heimdall raised the same incident again on ${new Date().toISOString()}.\n\n${body}`,
+              });
+              core.setOutput('issue_action', 'commented');
+              core.setOutput('issue_number', String(existing.number));
+              core.setOutput('issue_url', existing.html_url);
+              return;
+            }
+
+            const created = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+            });
+            core.setOutput('issue_action', 'created');
+            core.setOutput('issue_number', String(created.data.number));
+            core.setOutput('issue_url', created.data.html_url);
+
+      - name: Summarize escalation
+        shell: bash
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## Heimdall incident escalation
+
+          - Component: \`${{ inputs.component_kind }}:${{ inputs.component_namespace }}:${{ inputs.component_name }}\`
+          - Severity: \`${{ inputs.incident_severity }}\`
+          - Issue action: \`${{ steps.incident.outputs.issue_action }}\`
+          - Issue: ${{ steps.incident.outputs.issue_url }}
+          EOF

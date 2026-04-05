@@ -3,10 +3,21 @@
 Use this checklist to enable commit-driven Yggdrasil workflow emission across the
 official repositories in the `dakasa-yggdrasil` GitHub organization.
 
+The official repositories now also ship `incident-escalation.yml` and
+`postmortem.yml` so Heimdall can escalate incidents into repository-native
+operational flows.
+
 ## Baseline
 
 Every repository that ships `.github/workflows/emit-deploy-event.yml` should
 configure:
+
+For repositories that Heimdall observes directly through a `repository_binding`,
+also make sure:
+
+- Issues are enabled for the repository
+- `.github/workflows/incident-escalation.yml` exists
+- `.github/workflows/postmortem.yml` exists
 
 ## Recommended GitHub scope strategy
 
@@ -61,6 +72,7 @@ explicit and record the recommended overrides.
 | Repository | Component kind | Component name | Notes |
 | --- | --- | --- | --- |
 | `dakasa-yggdrasil/yggdrasil` | `product` | `yggdrasil` | Product monorepo |
+| `dakasa-yggdrasil/action-emit-workflow-run` | `repository` | `action-emit-workflow-run` | Official GitHub Action adapter |
 | `dakasa-yggdrasil/surface-auth` | `surface` | `yggdrasil-auth-surface` | Set `YGGDRASIL_COMPONENT_NAME` explicitly because the repo is named `surface-auth` |
 | `dakasa-yggdrasil/surface-console` | `surface` | `yggdrasil-console` | Set `YGGDRASIL_COMPONENT_NAME` explicitly because the repo is named `surface-console` |
 | `dakasa-yggdrasil/surface-template` | `surface` | `surface-template` | Template repo |
@@ -80,6 +92,12 @@ explicit and record the recommended overrides.
 
 - `YGGDRASIL_COMPONENT_KIND=product`
 - `YGGDRASIL_COMPONENT_NAME=yggdrasil`
+- `YGGDRASIL_DEPLOY_ENVIRONMENT=production`
+
+### action-emit-workflow-run
+
+- `YGGDRASIL_COMPONENT_KIND=repository`
+- `YGGDRASIL_COMPONENT_NAME=action-emit-workflow-run`
 - `YGGDRASIL_DEPLOY_ENVIRONMENT=production`
 
 ### surface-auth
@@ -162,3 +180,5 @@ in the target repositories.
 5. Validate that `global/github-caller` can dispatch `deploy.yml`.
 6. Trigger one manual `workflow_dispatch` of `emit-deploy-event.yml` in a test
    repository before relying on `push -> main`.
+7. Trigger one manual `workflow_dispatch` of `incident-escalation.yml` and
+   `postmortem.yml` in one monitored repository to validate issue creation.

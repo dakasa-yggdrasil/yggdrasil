@@ -51,7 +51,7 @@
       "severity_threshold": "critical",
       "max_auto_heal_attempts": 2,
       "create_approval": true,
-      "dispatch_workflow": false,
+      "dispatch_workflow": true,
       "issue_workflow": "incident-escalation.yml",
       "postmortem_workflow": "postmortem.yml",
       "ref": "main",
