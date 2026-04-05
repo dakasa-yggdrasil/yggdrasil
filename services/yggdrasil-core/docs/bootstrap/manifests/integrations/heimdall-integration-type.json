@@ -135,7 +135,8 @@
         },
         "llm_model": {
           "type": "string",
-          "description": "Legacy GPT model name used when llm_gpt_model is unset."
+          "description": "Legacy GPT model name used when llm_gpt_model is unset.",
+          "default": "gpt-5.4-mini-2026-03-17"
         },
         "llm_api_key": {
           "type": "string",
@@ -149,7 +150,8 @@
         },
         "llm_gpt_model": {
           "type": "string",
-          "description": "GPT model name used for constrained Heimdall fallback."
+          "description": "GPT model name used for constrained Heimdall fallback.",
+          "default": "gpt-5.4-mini-2026-03-17"
         },
         "llm_gpt_api_key": {
           "type": "string",
@@ -163,7 +165,8 @@
         },
         "llm_claude_model": {
           "type": "string",
-          "description": "Claude model name used for constrained Heimdall fallback."
+          "description": "Claude model name used for constrained Heimdall fallback.",
+          "default": "claude-sonnet-4-20250514"
         },
         "llm_claude_api_key": {
           "type": "string",
