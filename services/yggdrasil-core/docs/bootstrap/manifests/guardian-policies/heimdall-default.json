@@ -23,7 +23,22 @@
       "auto_execute_min_confidence": 0.7,
       "manual_review_below_confidence": 0.25,
       "max_auto_execute_blast_radius": "medium",
-      "max_bypass_hotfix_blast_radius": "high"
+      "max_bypass_hotfix_blast_radius": "high",
+      "protected_environments": {
+        "environments": ["prod", "production"],
+        "max_auto_execute_blast_radius": "low",
+        "max_bypass_hotfix_blast_radius": "medium"
+      },
+      "business_hours": {
+        "enabled": true,
+        "timezone": "UTC",
+        "weekdays": ["mon", "tue", "wed", "thu", "fri"],
+        "start_hour": 9,
+        "end_hour": 18,
+        "environments": ["prod", "production"],
+        "allow_hotfix_bypass": true
+      },
+      "freeze_windows": []
     },
     "auto_heal": {
       "enabled": true,

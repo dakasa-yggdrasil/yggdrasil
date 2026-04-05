@@ -37,11 +37,41 @@ type GuardianCostOptimizationPolicySpec struct {
 // GuardianAutonomyPolicySpec controls when Heimdall may act directly, when it
 // must request approval, and when it may engage the LLM fallback path.
 type GuardianAutonomyPolicySpec struct {
-	Mode                        string  `json:"mode,omitempty"`
-	AllowLLMFallback            bool    `json:"allow_llm_fallback,omitempty"`
-	HotfixSeverityThreshold     string  `json:"hotfix_severity_threshold,omitempty"`
-	AutoExecuteMinConfidence    float64 `json:"auto_execute_min_confidence,omitempty"`
-	ManualReviewBelowConfidence float64 `json:"manual_review_below_confidence,omitempty"`
-	MaxAutoExecuteBlastRadius   string  `json:"max_auto_execute_blast_radius,omitempty"`
-	MaxBypassHotfixBlastRadius  string  `json:"max_bypass_hotfix_blast_radius,omitempty"`
+	Mode                        string                                 `json:"mode,omitempty"`
+	AllowLLMFallback            bool                                   `json:"allow_llm_fallback,omitempty"`
+	HotfixSeverityThreshold     string                                 `json:"hotfix_severity_threshold,omitempty"`
+	AutoExecuteMinConfidence    float64                                `json:"auto_execute_min_confidence,omitempty"`
+	ManualReviewBelowConfidence float64                                `json:"manual_review_below_confidence,omitempty"`
+	MaxAutoExecuteBlastRadius   string                                 `json:"max_auto_execute_blast_radius,omitempty"`
+	MaxBypassHotfixBlastRadius  string                                 `json:"max_bypass_hotfix_blast_radius,omitempty"`
+	ProtectedEnvironments       GuardianProtectedEnvironmentPolicySpec `json:"protected_environments,omitempty"`
+	BusinessHours               GuardianBusinessHoursPolicySpec        `json:"business_hours,omitempty"`
+	FreezeWindows               []GuardianFreezeWindowPolicySpec       `json:"freeze_windows,omitempty"`
+}
+
+// GuardianProtectedEnvironmentPolicySpec tightens autonomy for sensitive environments.
+type GuardianProtectedEnvironmentPolicySpec struct {
+	Environments               []string `json:"environments,omitempty"`
+	MaxAutoExecuteBlastRadius  string   `json:"max_auto_execute_blast_radius,omitempty"`
+	MaxBypassHotfixBlastRadius string   `json:"max_bypass_hotfix_blast_radius,omitempty"`
+}
+
+// GuardianBusinessHoursPolicySpec limits autonomous actions to a business-hours envelope.
+type GuardianBusinessHoursPolicySpec struct {
+	Enabled           bool     `json:"enabled,omitempty"`
+	Timezone          string   `json:"timezone,omitempty"`
+	Weekdays          []string `json:"weekdays,omitempty"`
+	StartHour         int      `json:"start_hour,omitempty"`
+	EndHour           int      `json:"end_hour,omitempty"`
+	Environments      []string `json:"environments,omitempty"`
+	AllowHotfixBypass bool     `json:"allow_hotfix_bypass,omitempty"`
+}
+
+// GuardianFreezeWindowPolicySpec blocks autonomous changes during planned freeze periods.
+type GuardianFreezeWindowPolicySpec struct {
+	Name              string   `json:"name,omitempty"`
+	StartsAt          string   `json:"starts_at,omitempty"`
+	EndsAt            string   `json:"ends_at,omitempty"`
+	Environments      []string `json:"environments,omitempty"`
+	AllowHotfixBypass bool     `json:"allow_hotfix_bypass,omitempty"`
 }

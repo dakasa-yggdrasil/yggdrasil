@@ -71,6 +71,28 @@ func guardianPolicyFixture() model.GuardianPolicyManifestSpec {
 			ManualReviewBelowConfidence: 0.25,
 			MaxAutoExecuteBlastRadius:   "medium",
 			MaxBypassHotfixBlastRadius:  "high",
+			ProtectedEnvironments: model.GuardianProtectedEnvironmentPolicySpec{
+				Environments:               []string{"production"},
+				MaxAutoExecuteBlastRadius:  "low",
+				MaxBypassHotfixBlastRadius: "medium",
+			},
+			BusinessHours: model.GuardianBusinessHoursPolicySpec{
+				Enabled:           true,
+				Timezone:          "UTC",
+				Weekdays:          []string{"mon", "tue", "wed", "thu", "fri"},
+				StartHour:         9,
+				EndHour:           18,
+				Environments:      []string{"production"},
+				AllowHotfixBypass: true,
+			},
+			FreezeWindows: []model.GuardianFreezeWindowPolicySpec{
+				{
+					Name:         "release-freeze",
+					StartsAt:     "2026-12-20T00:00:00Z",
+					EndsAt:       "2026-12-27T00:00:00Z",
+					Environments: []string{"production"},
+				},
+			},
 		},
 	}
 }
@@ -91,5 +113,14 @@ func TestValidateGuardianPolicySpecRejectsInvalidBlastRadiusOrder(t *testing.T) 
 
 	if err := ValidateGuardianPolicySpec(spec); err == nil {
 		t.Fatal("expected invalid blast radius ordering to fail validation")
+	}
+}
+
+func TestValidateGuardianPolicySpecRejectsInvalidFreezeWindow(t *testing.T) {
+	spec := guardianPolicyFixture()
+	spec.Autonomy.FreezeWindows[0].EndsAt = "2026-12-19T00:00:00Z"
+
+	if err := ValidateGuardianPolicySpec(spec); err == nil {
+		t.Fatal("expected invalid freeze window ordering to fail validation")
 	}
 }

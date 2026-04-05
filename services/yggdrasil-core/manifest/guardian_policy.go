@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/dakasa-co/yggdrasil-core/model"
 )
 
 var supportedGuardianSeverityThresholds = []string{"low", "medium", "high", "critical"}
 var supportedGuardianAutonomyModes = []string{"policy_bound", "approval_required", "bypass_hotfix"}
+var supportedGuardianWeekdays = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
 // ParseGuardianPolicySpec parses the raw spec payload into the typed manifest.
 func ParseGuardianPolicySpec(raw json.RawMessage) (model.GuardianPolicyManifestSpec, error) {
@@ -54,6 +56,47 @@ func ValidateGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) error {
 	}
 	if spec.Autonomy.ManualReviewBelowConfidence > spec.Autonomy.AutoExecuteMinConfidence {
 		return fmt.Errorf("guardian_policy autonomy manual_review_below_confidence must be <= auto_execute_min_confidence")
+	}
+	if supportedGuardianSeverityRank(spec.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius) == 0 {
+		return fmt.Errorf("guardian_policy autonomy protected_environments.max_auto_execute_blast_radius %q is unsupported", spec.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius)
+	}
+	if supportedGuardianSeverityRank(spec.Autonomy.ProtectedEnvironments.MaxBypassHotfixBlastRadius) == 0 {
+		return fmt.Errorf("guardian_policy autonomy protected_environments.max_bypass_hotfix_blast_radius %q is unsupported", spec.Autonomy.ProtectedEnvironments.MaxBypassHotfixBlastRadius)
+	}
+	if supportedGuardianSeverityRank(spec.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius) > supportedGuardianSeverityRank(spec.Autonomy.ProtectedEnvironments.MaxBypassHotfixBlastRadius) {
+		return fmt.Errorf("guardian_policy autonomy protected_environments.max_auto_execute_blast_radius must be <= protected_environments.max_bypass_hotfix_blast_radius")
+	}
+	if spec.Autonomy.BusinessHours.Enabled {
+		if _, err := time.LoadLocation(spec.Autonomy.BusinessHours.Timezone); err != nil {
+			return fmt.Errorf("guardian_policy autonomy business_hours timezone %q is invalid", spec.Autonomy.BusinessHours.Timezone)
+		}
+		for _, weekday := range spec.Autonomy.BusinessHours.Weekdays {
+			if !slices.Contains(supportedGuardianWeekdays, weekday) {
+				return fmt.Errorf("guardian_policy autonomy business_hours weekday %q is unsupported", weekday)
+			}
+		}
+		if spec.Autonomy.BusinessHours.StartHour < 0 || spec.Autonomy.BusinessHours.StartHour > 23 {
+			return fmt.Errorf("guardian_policy autonomy business_hours start_hour must be between 0 and 23")
+		}
+		if spec.Autonomy.BusinessHours.EndHour < 0 || spec.Autonomy.BusinessHours.EndHour > 23 {
+			return fmt.Errorf("guardian_policy autonomy business_hours end_hour must be between 0 and 23")
+		}
+	}
+	for _, window := range spec.Autonomy.FreezeWindows {
+		if strings.TrimSpace(window.Name) == "" {
+			return fmt.Errorf("guardian_policy autonomy freeze_windows entries require a name")
+		}
+		start, err := time.Parse(time.RFC3339, window.StartsAt)
+		if err != nil {
+			return fmt.Errorf("guardian_policy autonomy freeze_windows %q has invalid starts_at", window.Name)
+		}
+		end, err := time.Parse(time.RFC3339, window.EndsAt)
+		if err != nil {
+			return fmt.Errorf("guardian_policy autonomy freeze_windows %q has invalid ends_at", window.Name)
+		}
+		if !end.After(start) {
+			return fmt.Errorf("guardian_policy autonomy freeze_windows %q requires ends_at after starts_at", window.Name)
+		}
 	}
 	if spec.AutoHeal.MaxActionsPerSweep < 0 {
 		return fmt.Errorf("guardian_policy auto_heal max_actions_per_sweep must be >= 0")
@@ -116,6 +159,47 @@ func NormalizeGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) model.Gu
 	if spec.Autonomy.ManualReviewBelowConfidence > spec.Autonomy.AutoExecuteMinConfidence {
 		spec.Autonomy.ManualReviewBelowConfidence = spec.Autonomy.AutoExecuteMinConfidence
 	}
+	spec.Autonomy.ProtectedEnvironments.Environments = normalizeGuardianEnvironmentList(spec.Autonomy.ProtectedEnvironments.Environments)
+	if len(spec.Autonomy.ProtectedEnvironments.Environments) == 0 {
+		spec.Autonomy.ProtectedEnvironments.Environments = []string{"prod", "production"}
+	}
+	spec.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius = strings.ToLower(strings.TrimSpace(spec.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius))
+	if spec.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius == "" {
+		spec.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius = "low"
+	}
+	spec.Autonomy.ProtectedEnvironments.MaxBypassHotfixBlastRadius = strings.ToLower(strings.TrimSpace(spec.Autonomy.ProtectedEnvironments.MaxBypassHotfixBlastRadius))
+	if spec.Autonomy.ProtectedEnvironments.MaxBypassHotfixBlastRadius == "" {
+		spec.Autonomy.ProtectedEnvironments.MaxBypassHotfixBlastRadius = "medium"
+	}
+
+	spec.Autonomy.BusinessHours.Timezone = strings.TrimSpace(spec.Autonomy.BusinessHours.Timezone)
+	if spec.Autonomy.BusinessHours.Timezone == "" {
+		spec.Autonomy.BusinessHours.Timezone = "UTC"
+	}
+	spec.Autonomy.BusinessHours.Weekdays = normalizeGuardianWeekdays(spec.Autonomy.BusinessHours.Weekdays)
+	if len(spec.Autonomy.BusinessHours.Weekdays) == 0 {
+		spec.Autonomy.BusinessHours.Weekdays = []string{"mon", "tue", "wed", "thu", "fri"}
+	}
+	if spec.Autonomy.BusinessHours.StartHour < 0 || spec.Autonomy.BusinessHours.StartHour > 23 {
+		spec.Autonomy.BusinessHours.StartHour = 9
+	}
+	if spec.Autonomy.BusinessHours.EndHour < 0 || spec.Autonomy.BusinessHours.EndHour > 23 {
+		spec.Autonomy.BusinessHours.EndHour = 18
+	}
+	spec.Autonomy.BusinessHours.Environments = normalizeGuardianEnvironmentList(spec.Autonomy.BusinessHours.Environments)
+
+	normalizedFreeze := make([]model.GuardianFreezeWindowPolicySpec, 0, len(spec.Autonomy.FreezeWindows))
+	for _, window := range spec.Autonomy.FreezeWindows {
+		window.Name = strings.TrimSpace(window.Name)
+		window.StartsAt = strings.TrimSpace(window.StartsAt)
+		window.EndsAt = strings.TrimSpace(window.EndsAt)
+		window.Environments = normalizeGuardianEnvironmentList(window.Environments)
+		if window.Name == "" || window.StartsAt == "" || window.EndsAt == "" {
+			continue
+		}
+		normalizedFreeze = append(normalizedFreeze, window)
+	}
+	spec.Autonomy.FreezeWindows = normalizedFreeze
 
 	if spec.CostOptimization.MinEstimatedMonthlySavingsUSD < 0 {
 		spec.CostOptimization.MinEstimatedMonthlySavingsUSD = 0
@@ -143,4 +227,44 @@ func supportedGuardianSeverityRank(value string) int {
 	default:
 		return 0
 	}
+}
+
+func normalizeGuardianEnvironmentList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		item := strings.ToLower(strings.TrimSpace(value))
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		normalized = append(normalized, item)
+	}
+	return normalized
+}
+
+func normalizeGuardianWeekdays(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		item := strings.ToLower(strings.TrimSpace(value))
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		normalized = append(normalized, item)
+	}
+	return normalized
 }

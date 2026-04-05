@@ -359,3 +359,132 @@ func TestHeimdallDecisionFromAssessmentRequiresManualReviewForCriticalBlastRadiu
 		t.Fatalf("confidence band = %q, want manual_review", decision.ConfidenceBand)
 	}
 }
+
+func TestHeimdallDecisionFromAssessmentProtectsProductionEnvironment(t *testing.T) {
+	decision := heimdallDecisionFromAssessmentAt(
+		map[string]any{
+			"type":         "dispatch_workflow",
+			"blast_radius": "medium",
+			"environment":  "production",
+		},
+		model.GuardianPolicyManifestSpec{
+			Autonomy: model.GuardianAutonomyPolicySpec{
+				Mode:                        "policy_bound",
+				AutoExecuteMinConfidence:    0.7,
+				ManualReviewBelowConfidence: 0.25,
+				HotfixSeverityThreshold:     "critical",
+				MaxAutoExecuteBlastRadius:   "medium",
+				MaxBypassHotfixBlastRadius:  "high",
+				ProtectedEnvironments: model.GuardianProtectedEnvironmentPolicySpec{
+					Environments:               []string{"production"},
+					MaxAutoExecuteBlastRadius:  "low",
+					MaxBypassHotfixBlastRadius: "medium",
+				},
+			},
+		},
+		"critical_auto_remediation",
+		heimdallActionConfidenceAssessment{
+			Confidence:       0.95,
+			ProviderGroup:    "github",
+			IncidentCategory: "runtime",
+			Attempts:         5,
+			RecoveryRate:     1,
+			BlastRadius:      "medium",
+			Environment:      "production",
+		},
+		time.Date(2026, time.April, 6, 14, 0, 0, 0, time.UTC),
+	)
+
+	if !decision.RequireApproval {
+		t.Fatal("expected production protection to require approval")
+	}
+	if !decision.ProtectedEnvironment {
+		t.Fatal("expected production environment to be marked as protected")
+	}
+}
+
+func TestHeimdallDecisionFromAssessmentBlocksOutsideBusinessHours(t *testing.T) {
+	decision := heimdallDecisionFromAssessmentAt(
+		map[string]any{
+			"type":         "dispatch_workflow",
+			"blast_radius": "low",
+			"environment":  "production",
+		},
+		model.GuardianPolicyManifestSpec{
+			Autonomy: model.GuardianAutonomyPolicySpec{
+				Mode:                        "policy_bound",
+				AutoExecuteMinConfidence:    0.7,
+				ManualReviewBelowConfidence: 0.25,
+				MaxAutoExecuteBlastRadius:   "medium",
+				MaxBypassHotfixBlastRadius:  "high",
+				BusinessHours: model.GuardianBusinessHoursPolicySpec{
+					Enabled:           true,
+					Timezone:          "UTC",
+					Weekdays:          []string{"mon", "tue", "wed", "thu", "fri"},
+					StartHour:         9,
+					EndHour:           18,
+					Environments:      []string{"production"},
+					AllowHotfixBypass: false,
+				},
+			},
+		},
+		"critical_auto_remediation",
+		heimdallActionConfidenceAssessment{
+			Confidence:  0.95,
+			BlastRadius: "low",
+			Environment: "production",
+		},
+		time.Date(2026, time.April, 6, 2, 0, 0, 0, time.UTC),
+	)
+
+	if !decision.RequireApproval {
+		t.Fatal("expected outside business hours to require approval")
+	}
+	if !decision.OutsideBusinessHours {
+		t.Fatal("expected decision to flag outside business hours")
+	}
+}
+
+func TestHeimdallDecisionFromAssessmentBlocksDuringFreezeWindow(t *testing.T) {
+	decision := heimdallDecisionFromAssessmentAt(
+		map[string]any{
+			"type":         "dispatch_workflow",
+			"blast_radius": "low",
+			"environment":  "production",
+		},
+		model.GuardianPolicyManifestSpec{
+			Autonomy: model.GuardianAutonomyPolicySpec{
+				Mode:                        "policy_bound",
+				AutoExecuteMinConfidence:    0.7,
+				ManualReviewBelowConfidence: 0.25,
+				MaxAutoExecuteBlastRadius:   "medium",
+				MaxBypassHotfixBlastRadius:  "high",
+				FreezeWindows: []model.GuardianFreezeWindowPolicySpec{
+					{
+						Name:         "release-freeze",
+						StartsAt:     "2026-04-01T00:00:00Z",
+						EndsAt:       "2026-04-10T00:00:00Z",
+						Environments: []string{"production"},
+					},
+				},
+			},
+		},
+		"critical_auto_remediation",
+		heimdallActionConfidenceAssessment{
+			Confidence:  0.95,
+			BlastRadius: "low",
+			Environment: "production",
+		},
+		time.Date(2026, time.April, 6, 14, 0, 0, 0, time.UTC),
+	)
+
+	if !decision.RequireApproval {
+		t.Fatal("expected freeze window to require approval")
+	}
+	if !decision.ManualReview {
+		t.Fatal("expected freeze window to require manual review")
+	}
+	if decision.ActiveFreezeWindow != "release-freeze" {
+		t.Fatalf("freeze window = %q, want release-freeze", decision.ActiveFreezeWindow)
+	}
+}

@@ -69,21 +69,39 @@ type heimdallActionConfidenceAssessment struct {
 	ConfidenceBand           string
 	BlastRadius              string
 	BlastRadiusReason        string
+	Environment              string
 }
 
 type heimdallAutonomyDecision struct {
-	Mode              string
-	RequireApproval   bool
-	ManualReview      bool
-	Confidence        float64
-	ConfidenceBand    string
-	Reason            string
-	ProviderGroup     string
-	IncidentCategory  string
-	Attempts          float64
-	RecoveryRate      float64
-	BlastRadius       string
-	BlastRadiusReason string
+	Mode                 string
+	RequireApproval      bool
+	ManualReview         bool
+	Confidence           float64
+	ConfidenceBand       string
+	Reason               string
+	ProviderGroup        string
+	IncidentCategory     string
+	Attempts             float64
+	RecoveryRate         float64
+	BlastRadius          string
+	BlastRadiusReason    string
+	Environment          string
+	OutsideBusinessHours bool
+	ActiveFreezeWindow   string
+	ProtectedEnvironment bool
+}
+
+type heimdallOperationalContext struct {
+	Environment                string
+	EffectiveAutoBlastRadius   string
+	EffectiveBypassBlastRadius string
+	ProtectedEnvironment       bool
+	OutsideBusinessHours       bool
+	BusinessHoursReason        string
+	ActiveFreezeWindow         string
+	FreezeReason               string
+	BusinessHoursAllowsBypass  bool
+	FreezeAllowsBypass         bool
 }
 
 // StartHeimdallGuardianLoop runs the periodic closed-loop guardian sweep.
@@ -948,6 +966,7 @@ func executeHeimdallActionWithOptions(
 	source string,
 	options heimdallExecutionOptions,
 ) error {
+	action = heimdallEnrichActionOperationalContext(action, repositoryBindings)
 	decision := options.Decision
 	if decision == nil {
 		resolved, err := heimdallResolveAutonomyDecision(ctx, db, action, policy, source)
@@ -1064,7 +1083,7 @@ func heimdallResolveAutonomyDecision(
 	if err != nil {
 		return heimdallAutonomyDecision{}, err
 	}
-	return heimdallDecisionFromAssessment(action, policy, source, assessment), nil
+	return heimdallDecisionFromAssessmentAt(action, policy, source, assessment, time.Now().UTC()), nil
 }
 
 func heimdallDecisionFromAssessment(
@@ -1073,6 +1092,16 @@ func heimdallDecisionFromAssessment(
 	source string,
 	assessment heimdallActionConfidenceAssessment,
 ) heimdallAutonomyDecision {
+	return heimdallDecisionFromAssessmentAt(action, policy, source, assessment, time.Now().UTC())
+}
+
+func heimdallDecisionFromAssessmentAt(
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+	assessment heimdallActionConfidenceAssessment,
+	now time.Time,
+) heimdallAutonomyDecision {
 	blastRadius, blastRadiusReason := heimdallResolveActionBlastRadius(action)
 	if strings.TrimSpace(assessment.BlastRadius) != "" {
 		blastRadius = assessment.BlastRadius
@@ -1080,28 +1109,46 @@ func heimdallDecisionFromAssessment(
 	if strings.TrimSpace(assessment.BlastRadiusReason) != "" {
 		blastRadiusReason = assessment.BlastRadiusReason
 	}
+	operational := heimdallResolveOperationalContext(action, policy, now)
 
 	decision := heimdallAutonomyDecision{
-		Mode:              policy.Autonomy.Mode,
-		Confidence:        assessment.Confidence,
-		ConfidenceBand:    heimdallConfidenceBand(policy, assessment.Confidence),
-		ProviderGroup:     assessment.ProviderGroup,
-		IncidentCategory:  assessment.IncidentCategory,
-		Attempts:          assessment.Attempts,
-		RecoveryRate:      assessment.RecoveryRate,
-		BlastRadius:       blastRadius,
-		BlastRadiusReason: blastRadiusReason,
+		Mode:                 policy.Autonomy.Mode,
+		Confidence:           assessment.Confidence,
+		ConfidenceBand:       heimdallConfidenceBand(policy, assessment.Confidence),
+		ProviderGroup:        assessment.ProviderGroup,
+		IncidentCategory:     assessment.IncidentCategory,
+		Attempts:             assessment.Attempts,
+		RecoveryRate:         assessment.RecoveryRate,
+		BlastRadius:          blastRadius,
+		BlastRadiusReason:    blastRadiusReason,
+		Environment:          firstNonEmpty(assessment.Environment, operational.Environment),
+		OutsideBusinessHours: operational.OutsideBusinessHours,
+		ActiveFreezeWindow:   operational.ActiveFreezeWindow,
+		ProtectedEnvironment: operational.ProtectedEnvironment,
 	}
-	autoExecuteAllowed := heimdallBlastRadiusWithinLimit(blastRadius, policy.Autonomy.MaxAutoExecuteBlastRadius)
-	hotfixBypassAllowed := heimdallBlastRadiusWithinLimit(blastRadius, policy.Autonomy.MaxBypassHotfixBlastRadius)
+	autoExecuteAllowed := heimdallBlastRadiusWithinLimit(blastRadius, operational.EffectiveAutoBlastRadius)
+	hotfixBypassAllowed := heimdallBlastRadiusWithinLimit(blastRadius, operational.EffectiveBypassBlastRadius)
+	if operational.OutsideBusinessHours {
+		autoExecuteAllowed = false
+		if !operational.BusinessHoursAllowsBypass {
+			hotfixBypassAllowed = false
+		}
+	}
+	if operational.ActiveFreezeWindow != "" {
+		autoExecuteAllowed = false
+		if !operational.FreezeAllowsBypass {
+			hotfixBypassAllowed = false
+		}
+	}
 
 	if policy.Autonomy.Mode == "approval_required" {
 		decision.RequireApproval = true
-		decision.ManualReview = assessment.Confidence <= policy.Autonomy.ManualReviewBelowConfidence || !hotfixBypassAllowed
+		decision.ManualReview = assessment.Confidence <= policy.Autonomy.ManualReviewBelowConfidence || !hotfixBypassAllowed || operational.ActiveFreezeWindow != ""
 		decision.Reason = "guardian policy requires approval for every action"
 		if !autoExecuteAllowed {
-			decision.Reason = fmt.Sprintf("%s Blast radius %q is above the auto-execute limit %q.", decision.Reason, blastRadius, policy.Autonomy.MaxAutoExecuteBlastRadius)
+			decision.Reason = fmt.Sprintf("%s Blast radius %q is above the auto-execute limit %q.", decision.Reason, blastRadius, operational.EffectiveAutoBlastRadius)
 		}
+		decision.Reason = heimdallAppendOperationalReason(decision.Reason, operational)
 		return decision
 	}
 
@@ -1110,6 +1157,7 @@ func heimdallDecisionFromAssessment(
 		if hotfixBypassAllowed {
 			decision.ConfidenceBand = "bypass_hotfix"
 			decision.Reason = "guardian policy allows emergency bypass for this hotfix severity"
+			decision.Reason = heimdallAppendOperationalReason(decision.Reason, operational)
 			return decision
 		}
 		decision.RequireApproval = true
@@ -1118,18 +1166,20 @@ func heimdallDecisionFromAssessment(
 		decision.Reason = fmt.Sprintf(
 			"incident qualifies for hotfix bypass, but blast radius %q exceeds the bypass limit %q",
 			blastRadius,
-			policy.Autonomy.MaxBypassHotfixBlastRadius,
+			operational.EffectiveBypassBlastRadius,
 		)
+		decision.Reason = heimdallAppendOperationalReason(decision.Reason, operational)
 		return decision
 	}
 
 	if assessment.Confidence >= policy.Autonomy.AutoExecuteMinConfidence {
 		if autoExecuteAllowed {
 			decision.Reason = "historical memory shows this playbook is safe enough to auto-execute"
+			decision.Reason = heimdallAppendOperationalReason(decision.Reason, operational)
 			return decision
 		}
 		decision.RequireApproval = true
-		decision.ManualReview = !hotfixBypassAllowed
+		decision.ManualReview = !hotfixBypassAllowed || operational.ActiveFreezeWindow != ""
 		if decision.ManualReview {
 			decision.ConfidenceBand = "manual_review"
 		} else {
@@ -1138,8 +1188,9 @@ func heimdallDecisionFromAssessment(
 		decision.Reason = fmt.Sprintf(
 			"historical memory is strong, but blast radius %q exceeds the auto-execute limit %q",
 			blastRadius,
-			policy.Autonomy.MaxAutoExecuteBlastRadius,
+			operational.EffectiveAutoBlastRadius,
 		)
+		decision.Reason = heimdallAppendOperationalReason(decision.Reason, operational)
 		return decision
 	}
 
@@ -1157,16 +1208,21 @@ func heimdallDecisionFromAssessment(
 			"%s Blast radius %q exceeds the bypass limit %q.",
 			decision.Reason,
 			blastRadius,
-			policy.Autonomy.MaxBypassHotfixBlastRadius,
+			operational.EffectiveBypassBlastRadius,
 		)
 	} else if !autoExecuteAllowed {
 		decision.Reason = fmt.Sprintf(
 			"%s Blast radius %q exceeds the auto-execute limit %q.",
 			decision.Reason,
 			blastRadius,
-			policy.Autonomy.MaxAutoExecuteBlastRadius,
+			operational.EffectiveAutoBlastRadius,
 		)
 	}
+	if operational.ActiveFreezeWindow != "" {
+		decision.ManualReview = true
+		decision.ConfidenceBand = "manual_review"
+	}
+	decision.Reason = heimdallAppendOperationalReason(decision.Reason, operational)
 	return decision
 }
 
@@ -1248,6 +1304,193 @@ func heimdallBlastRadiusRank(value string) int {
 		return 4
 	default:
 		return 0
+	}
+}
+
+func heimdallEnrichActionOperationalContext(
+	action map[string]any,
+	repositoryBindings map[string]heimdallRepositoryBinding,
+) map[string]any {
+	enriched := cloneAuthorizationInput(action)
+	if strings.TrimSpace(anyString(enriched["environment"])) != "" {
+		return enriched
+	}
+	if binding, err := resolveHeimdallActionBinding(enriched, repositoryBindings); err == nil {
+		environment := strings.ToLower(strings.TrimSpace(anyString(binding.Spec.Metadata["environment"])))
+		if environment != "" {
+			enriched["environment"] = environment
+		}
+	}
+	return enriched
+}
+
+func heimdallResolveOperationalContext(
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	now time.Time,
+) heimdallOperationalContext {
+	environment := heimdallActionEnvironment(action)
+	context := heimdallOperationalContext{
+		Environment:                environment,
+		EffectiveAutoBlastRadius:   policy.Autonomy.MaxAutoExecuteBlastRadius,
+		EffectiveBypassBlastRadius: policy.Autonomy.MaxBypassHotfixBlastRadius,
+		BusinessHoursAllowsBypass:  policy.Autonomy.BusinessHours.AllowHotfixBypass,
+	}
+	if heimdallEnvironmentMatches(environment, policy.Autonomy.ProtectedEnvironments.Environments) {
+		context.ProtectedEnvironment = true
+		context.EffectiveAutoBlastRadius = heimdallMinBlastRadius(context.EffectiveAutoBlastRadius, policy.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius)
+		context.EffectiveBypassBlastRadius = heimdallMinBlastRadius(context.EffectiveBypassBlastRadius, policy.Autonomy.ProtectedEnvironments.MaxBypassHotfixBlastRadius)
+	}
+	if policy.Autonomy.BusinessHours.Enabled && heimdallEnvironmentMatches(environment, policy.Autonomy.BusinessHours.Environments) {
+		context.OutsideBusinessHours, context.BusinessHoursReason = heimdallOutsideBusinessHours(policy.Autonomy.BusinessHours, now)
+	}
+	if active, reason, allowBypass := heimdallActiveFreezeWindow(policy.Autonomy.FreezeWindows, environment, now); active != "" {
+		context.ActiveFreezeWindow = active
+		context.FreezeReason = reason
+		context.FreezeAllowsBypass = allowBypass
+	}
+	if context.EffectiveAutoBlastRadius == "" {
+		context.EffectiveAutoBlastRadius = policy.Autonomy.MaxAutoExecuteBlastRadius
+	}
+	if context.EffectiveBypassBlastRadius == "" {
+		context.EffectiveBypassBlastRadius = policy.Autonomy.MaxBypassHotfixBlastRadius
+	}
+	return context
+}
+
+func heimdallAppendOperationalReason(reason string, context heimdallOperationalContext) string {
+	if context.Environment != "" {
+		reason = fmt.Sprintf("%s Environment=%s.", strings.TrimSpace(reason), context.Environment)
+	}
+	if context.ProtectedEnvironment {
+		reason = fmt.Sprintf("%s Protected-environment limits apply.", strings.TrimSpace(reason))
+	}
+	if context.OutsideBusinessHours && context.BusinessHoursReason != "" {
+		reason = fmt.Sprintf("%s %s", strings.TrimSpace(reason), context.BusinessHoursReason)
+	}
+	if context.ActiveFreezeWindow != "" {
+		if context.FreezeReason != "" {
+			reason = fmt.Sprintf("%s %s", strings.TrimSpace(reason), context.FreezeReason)
+		} else {
+			reason = fmt.Sprintf("%s Freeze window %q is active.", strings.TrimSpace(reason), context.ActiveFreezeWindow)
+		}
+	}
+	return strings.TrimSpace(reason)
+}
+
+func heimdallActionEnvironment(action map[string]any) string {
+	target := heimdallActionObject(action, "target")
+	incident := heimdallActionObject(action, "incident")
+	return strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		anyString(action["environment"]),
+		anyString(target["environment"]),
+		anyString(incident["environment"]),
+	)))
+}
+
+func heimdallEnvironmentMatches(environment string, allowed []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	normalized := strings.ToLower(strings.TrimSpace(environment))
+	if normalized == "" {
+		return false
+	}
+	for _, candidate := range allowed {
+		if normalized == strings.ToLower(strings.TrimSpace(candidate)) {
+			return true
+		}
+	}
+	return false
+}
+
+func heimdallOutsideBusinessHours(spec model.GuardianBusinessHoursPolicySpec, now time.Time) (bool, string) {
+	location, err := time.LoadLocation(spec.Timezone)
+	if err != nil {
+		location = time.UTC
+	}
+	local := now.In(location)
+	weekday := heimdallNormalizeWeekday(local.Weekday())
+	allowedDay := false
+	for _, candidate := range spec.Weekdays {
+		if weekday == candidate {
+			allowedDay = true
+			break
+		}
+	}
+	if !allowedDay {
+		return true, fmt.Sprintf("Current local weekday %s is outside configured business days in %s.", weekday, location.String())
+	}
+	if !heimdallHourInWindow(local.Hour(), spec.StartHour, spec.EndHour) {
+		return true, fmt.Sprintf("Current local hour %02d:00 is outside configured business hours in %s.", local.Hour(), location.String())
+	}
+	return false, ""
+}
+
+func heimdallHourInWindow(hour, start, end int) bool {
+	if start == end {
+		return true
+	}
+	if start < end {
+		return hour >= start && hour < end
+	}
+	return hour >= start || hour < end
+}
+
+func heimdallActiveFreezeWindow(
+	windows []model.GuardianFreezeWindowPolicySpec,
+	environment string,
+	now time.Time,
+) (string, string, bool) {
+	for _, window := range windows {
+		if !heimdallEnvironmentMatches(environment, window.Environments) {
+			continue
+		}
+		start, err := time.Parse(time.RFC3339, window.StartsAt)
+		if err != nil {
+			continue
+		}
+		end, err := time.Parse(time.RFC3339, window.EndsAt)
+		if err != nil {
+			continue
+		}
+		if now.Before(start) || !now.Before(end) {
+			continue
+		}
+		return window.Name, fmt.Sprintf("Freeze window %q is active until %s.", window.Name, end.UTC().Format(time.RFC3339)), window.AllowHotfixBypass
+	}
+	return "", "", false
+}
+
+func heimdallMinBlastRadius(left, right string) string {
+	if heimdallBlastRadiusRank(left) == 0 {
+		return right
+	}
+	if heimdallBlastRadiusRank(right) == 0 {
+		return left
+	}
+	if heimdallBlastRadiusRank(left) <= heimdallBlastRadiusRank(right) {
+		return left
+	}
+	return right
+}
+
+func heimdallNormalizeWeekday(weekday time.Weekday) string {
+	switch weekday {
+	case time.Monday:
+		return "mon"
+	case time.Tuesday:
+		return "tue"
+	case time.Wednesday:
+		return "wed"
+	case time.Thursday:
+		return "thu"
+	case time.Friday:
+		return "fri"
+	case time.Saturday:
+		return "sat"
+	default:
+		return "sun"
 	}
 }
 
@@ -2078,16 +2321,20 @@ func heimdallActionLearningMetadata(
 
 func heimdallDecisionMetadata(decision heimdallAutonomyDecision) map[string]any {
 	return map[string]any{
-		"confidence":        round2(decision.Confidence),
-		"confidence_band":   strings.TrimSpace(decision.ConfidenceBand),
-		"confidence_reason": strings.TrimSpace(decision.Reason),
-		"manual_review":     decision.ManualReview,
-		"blast_radius":      strings.TrimSpace(decision.BlastRadius),
-		"blast_reason":      strings.TrimSpace(decision.BlastRadiusReason),
-		"provider_group":    strings.TrimSpace(decision.ProviderGroup),
-		"incident_category": strings.TrimSpace(decision.IncidentCategory),
-		"attempts":          round2(decision.Attempts),
-		"recovery_rate":     round2(decision.RecoveryRate),
+		"confidence":             round2(decision.Confidence),
+		"confidence_band":        strings.TrimSpace(decision.ConfidenceBand),
+		"confidence_reason":      strings.TrimSpace(decision.Reason),
+		"manual_review":          decision.ManualReview,
+		"blast_radius":           strings.TrimSpace(decision.BlastRadius),
+		"blast_reason":           strings.TrimSpace(decision.BlastRadiusReason),
+		"environment":            strings.TrimSpace(decision.Environment),
+		"outside_business_hours": decision.OutsideBusinessHours,
+		"freeze_window":          strings.TrimSpace(decision.ActiveFreezeWindow),
+		"protected_environment":  decision.ProtectedEnvironment,
+		"provider_group":         strings.TrimSpace(decision.ProviderGroup),
+		"incident_category":      strings.TrimSpace(decision.IncidentCategory),
+		"attempts":               round2(decision.Attempts),
+		"recovery_rate":          round2(decision.RecoveryRate),
 	}
 }
 
@@ -2117,6 +2364,7 @@ func heimdallAssessActionConfidenceFromMemories(
 	providerGroup := anyString(current["provider_group"])
 	incidentCategory := anyString(current["incident_category"])
 	blastRadius, blastRadiusReason := heimdallResolveActionBlastRadius(action)
+	environment := heimdallActionEnvironment(action)
 
 	if actionType == "" {
 		return heimdallDefaultActionConfidence(action)
@@ -2191,6 +2439,7 @@ func heimdallAssessActionConfidenceFromMemories(
 		IncidentCategory:         incidentCategory,
 		BlastRadius:              blastRadius,
 		BlastRadiusReason:        blastRadiusReason,
+		Environment:              environment,
 	}
 }
 
@@ -2208,6 +2457,7 @@ func heimdallDefaultActionConfidence(action map[string]any) heimdallActionConfid
 		IncidentCategory:  anyString(current["incident_category"]),
 		BlastRadius:       blastRadius,
 		BlastRadiusReason: blastRadiusReason,
+		Environment:       heimdallActionEnvironment(action),
 	}
 }
 
@@ -2925,6 +3175,38 @@ func heimdallPolicyInput(policy model.GuardianPolicyManifestSpec) map[string]any
 			"manual_review_below_confidence": policy.Autonomy.ManualReviewBelowConfidence,
 			"max_auto_execute_blast_radius":  policy.Autonomy.MaxAutoExecuteBlastRadius,
 			"max_bypass_hotfix_blast_radius": policy.Autonomy.MaxBypassHotfixBlastRadius,
+			"protected_environments": map[string]any{
+				"environments":                   cloneStringSlice(policy.Autonomy.ProtectedEnvironments.Environments),
+				"max_auto_execute_blast_radius":  policy.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius,
+				"max_bypass_hotfix_blast_radius": policy.Autonomy.ProtectedEnvironments.MaxBypassHotfixBlastRadius,
+			},
+			"business_hours": map[string]any{
+				"enabled":             policy.Autonomy.BusinessHours.Enabled,
+				"timezone":            policy.Autonomy.BusinessHours.Timezone,
+				"weekdays":            cloneStringSlice(policy.Autonomy.BusinessHours.Weekdays),
+				"start_hour":          policy.Autonomy.BusinessHours.StartHour,
+				"end_hour":            policy.Autonomy.BusinessHours.EndHour,
+				"environments":        cloneStringSlice(policy.Autonomy.BusinessHours.Environments),
+				"allow_hotfix_bypass": policy.Autonomy.BusinessHours.AllowHotfixBypass,
+			},
+			"freeze_windows": heimdallPolicyFreezeWindowsInput(policy.Autonomy.FreezeWindows),
 		},
 	}
+}
+
+func heimdallPolicyFreezeWindowsInput(windows []model.GuardianFreezeWindowPolicySpec) []map[string]any {
+	if len(windows) == 0 {
+		return nil
+	}
+	items := make([]map[string]any, 0, len(windows))
+	for _, window := range windows {
+		items = append(items, map[string]any{
+			"name":                window.Name,
+			"starts_at":           window.StartsAt,
+			"ends_at":             window.EndsAt,
+			"environments":        cloneStringSlice(window.Environments),
+			"allow_hotfix_bypass": window.AllowHotfixBypass,
+		})
+	}
+	return items
 }
