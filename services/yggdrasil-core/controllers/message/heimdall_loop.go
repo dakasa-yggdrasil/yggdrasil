@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,11 @@ type heimdallRemediationContract struct {
 type heimdallGuardianMemory struct {
 	Manifest model.Manifest
 	Spec     model.GuardianMemoryManifestSpec
+}
+
+type heimdallRemediationBundle struct {
+	Manifest model.Manifest
+	Spec     model.RemediationBundleManifestSpec
 }
 
 type heimdallExecutionOptions struct {
@@ -990,6 +996,14 @@ func executeHeimdallActionWithOptions(
 		options.Decision = decision
 	}
 
+	action, _, err := ensureHeimdallRemediationBundleAction(ctx, db, action, policy, source, options)
+	if err != nil {
+		return err
+	}
+	if anyString(action["type"]) == "remediation_bundle" && policy.GeneratedBundles.RequireApproval && !options.SkipApproval {
+		decision.RequireApproval = true
+	}
+
 	if decision.Escalate {
 		return executeHeimdallEscalation(ctx, conn, db, action, repositoryBindings, policy, source, options)
 	}
@@ -1026,6 +1040,8 @@ func executeHeimdallActionWithOptions(
 		err = executeHeimdallSecretRotation(ctx, db, action)
 	case "page_team":
 		err = executeHeimdallHumanEscalation(ctx, db, action, policy, source, options)
+	case "remediation_bundle":
+		err = executeHeimdallRemediationBundle(ctx, conn, db, action, repositoryBindings, policy, source, options)
 	default:
 		err = fmt.Errorf("heimdall action type %q is not executable by the core loop", actionType)
 	}
@@ -1651,13 +1667,17 @@ func createHeimdallApprovalRequest(
 	}
 	spec.Metadata["memory_name"] = memory.Manifest.Metadata.Name
 	spec.Metadata["memory_namespace"] = memory.Manifest.Metadata.Namespace
+	if bundleRef := asObject(action["target"])["remediation_bundle"]; bundleRef != nil {
+		spec.Metadata["bundle_name"] = anyString(asObject(bundleRef)["name"])
+		spec.Metadata["bundle_namespace"] = firstNonEmpty(anyString(asObject(bundleRef)["namespace"]), "global")
+	}
 
 	specRaw, err := json.Marshal(spec)
 	if err != nil {
 		return fmt.Errorf("marshal guardian_approval spec: %w", err)
 	}
 
-	_, err = heimdallCreateManifestVersion(ctx, db, model.ManifestDocument{
+	approvalManifest, err := heimdallCreateManifestVersion(ctx, db, model.ManifestDocument{
 		APIVersion: "yggdrasil.io/v1alpha1",
 		Kind:       "guardian_approval",
 		Metadata: model.ManifestMetadataInput{
@@ -1678,6 +1698,11 @@ func createHeimdallApprovalRequest(
 	})
 	if err != nil {
 		return err
+	}
+	if bundleName := strings.TrimSpace(anyString(spec.Metadata["bundle_name"])); bundleName != "" {
+		if err := updateHeimdallApprovalLinkedBundle(ctx, db, firstNonEmpty(anyString(spec.Metadata["bundle_namespace"]), "global"), bundleName, approvalManifest); err != nil {
+			return err
+		}
 	}
 
 	markHeimdallActionCooldown(action, binding)
@@ -1829,6 +1854,540 @@ func executeHeimdallHumanEscalation(
 		forced.Reason = "Heimdall requested human escalation for this incident."
 	}
 	return createHeimdallApprovalRequest(ctx, db, action, policy, firstNonEmpty(source, "incident_escalation"), forced)
+}
+
+func ensureHeimdallRemediationBundleAction(
+	ctx context.Context,
+	db *sql.DB,
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+	options heimdallExecutionOptions,
+) (map[string]any, heimdallRemediationBundle, error) {
+	if normalizeState(anyString(action["type"])) != "remediation_bundle" {
+		return action, heimdallRemediationBundle{}, nil
+	}
+	if !policy.GeneratedBundles.Enabled {
+		return nil, heimdallRemediationBundle{}, fmt.Errorf("heimdall guardian policy blocks generated remediation bundles")
+	}
+
+	action = cloneAuthorizationInput(action)
+	target := asObject(action["target"])
+	if target == nil {
+		target = map[string]any{}
+	}
+	ref := asObject(target["remediation_bundle"])
+	if name := strings.TrimSpace(anyString(ref["name"])); name != "" {
+		namespace := firstNonEmpty(anyString(ref["namespace"]), "global")
+		manifestRecord, err := repository.ResolveManifest(ctx, db, "remediation_bundle", namespace, name, nil, true)
+		if err != nil {
+			return nil, heimdallRemediationBundle{}, err
+		}
+		spec, err := manifestengine.ParseRemediationBundleSpec(manifestRecord.Spec)
+		if err != nil {
+			return nil, heimdallRemediationBundle{}, err
+		}
+		spec = manifestengine.NormalizeRemediationBundleSpec(spec)
+		target["remediation_bundle"] = heimdallRemediationBundleRef(manifestRecord, spec)
+		action["target"] = target
+		return action, heimdallRemediationBundle{Manifest: manifestRecord, Spec: spec}, nil
+	}
+
+	now := time.Now().UTC()
+	spec, err := heimdallRemediationBundleSpecFromAction(action, policy, source, options, now)
+	if err != nil {
+		return nil, heimdallRemediationBundle{}, err
+	}
+	name := normalizeHeimdallRemediationBundleName(spec.ComponentKind, spec.ComponentName, spec.BundleKind, now)
+	specRaw, err := json.Marshal(spec)
+	if err != nil {
+		return nil, heimdallRemediationBundle{}, fmt.Errorf("marshal remediation_bundle spec: %w", err)
+	}
+	manifestRecord, err := heimdallCreateManifestVersion(ctx, db, model.ManifestDocument{
+		APIVersion: "yggdrasil.io/v1alpha1",
+		Kind:       "remediation_bundle",
+		Metadata: model.ManifestMetadataInput{
+			Name:        name,
+			Namespace:   "global",
+			Description: firstNonEmpty(spec.Summary, fmt.Sprintf("Generated Heimdall remediation bundle for %s/%s", spec.ComponentNamespace, spec.ComponentName)),
+			Labels: map[string]string{
+				"guardian":         "heimdall",
+				"bundle_kind":      spec.BundleKind,
+				"bundle_status":    spec.Status,
+				"component_kind":   spec.ComponentKind,
+				"component_name":   spec.ComponentName,
+				"component_ns":     spec.ComponentNamespace,
+				"bundle_source":    spec.Source,
+				"promotion_target": strings.TrimSpace(anyString(spec.Metadata["promotion_target"])),
+			},
+		},
+		Spec: specRaw,
+	})
+	if err != nil {
+		return nil, heimdallRemediationBundle{}, err
+	}
+
+	target["remediation_bundle"] = heimdallRemediationBundleRef(manifestRecord, spec)
+	action["target"] = target
+	return action, heimdallRemediationBundle{Manifest: manifestRecord, Spec: spec}, nil
+}
+
+func heimdallRemediationBundleSpecFromAction(
+	action map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+	options heimdallExecutionOptions,
+	now time.Time,
+) (model.RemediationBundleManifestSpec, error) {
+	bundle := asObject(action["bundle"])
+	if len(bundle) == 0 {
+		return model.RemediationBundleManifestSpec{}, fmt.Errorf("remediation_bundle action requires a bundle payload")
+	}
+
+	bundleKind := normalizeState(firstNonEmpty(anyString(bundle["kind"]), anyString(bundle["bundle_kind"]), model.RemediationBundleKindIntegrationComposition))
+	if !heimdallGeneratedBundleKindAllowed(bundleKind, policy.GeneratedBundles) {
+		return model.RemediationBundleManifestSpec{}, fmt.Errorf("heimdall guardian policy blocks remediation bundle kind %q", bundleKind)
+	}
+
+	ttlSeconds := positiveInt(anyInt(bundle["ttl_seconds"]), policy.GeneratedBundles.MaxTTLSeconds)
+	if ttlSeconds <= 0 {
+		ttlSeconds = policy.GeneratedBundles.MaxTTLSeconds
+	}
+	if policy.GeneratedBundles.MaxTTLSeconds > 0 && ttlSeconds > policy.GeneratedBundles.MaxTTLSeconds {
+		ttlSeconds = policy.GeneratedBundles.MaxTTLSeconds
+	}
+	expiresAt := now.Add(time.Duration(ttlSeconds) * time.Second)
+	if explicitExpiresAt := strings.TrimSpace(anyString(bundle["expires_at"])); explicitExpiresAt != "" {
+		parsed, err := time.Parse(time.RFC3339, explicitExpiresAt)
+		if err != nil {
+			return model.RemediationBundleManifestSpec{}, fmt.Errorf("parse remediation bundle expires_at: %w", err)
+		}
+		if parsed.Before(expiresAt) {
+			expiresAt = parsed
+		}
+	}
+
+	steps, err := heimdallRemediationBundleStepsFromAction(bundle, action)
+	if err != nil {
+		return model.RemediationBundleManifestSpec{}, err
+	}
+	status := model.RemediationBundleStatusProposed
+	if policy.GeneratedBundles.RequireApproval && !options.SkipApproval {
+		status = model.RemediationBundleStatusPendingApproval
+	}
+	spec := manifestengine.NormalizeRemediationBundleSpec(model.RemediationBundleManifestSpec{
+		GuardianRef:        policy.GuardianRef,
+		Status:             status,
+		Source:             firstNonEmpty(normalizeState(anyString(action["proposed_by"])), source, "llm_generated"),
+		BundleKind:         bundleKind,
+		Summary:            firstNonEmpty(anyString(bundle["summary"]), anyString(action["description"]), "Generated remediation bundle"),
+		ComponentKind:      firstNonEmpty(anyString(action["component_kind"]), anyString(action["kind"]), "component"),
+		ComponentNamespace: firstNonEmpty(anyString(action["component_namespace"]), anyString(action["namespace"]), "global"),
+		ComponentName:      firstNonEmpty(anyString(action["component_name"]), anyString(action["name"]), "unknown"),
+		ExpiresAt:          expiresAt.Format(time.RFC3339),
+		TriggerAction:      cloneAuthorizationInput(action),
+		Incident:           heimdallIncidentFromAction(action),
+		Steps:              steps,
+		Metadata: map[string]any{
+			"ttl_seconds":       ttlSeconds,
+			"created_at":        now.Format(time.RFC3339),
+			"created_from":      "heimdall_action",
+			"source":            source,
+			"approval_required": policy.GeneratedBundles.RequireApproval && !options.SkipApproval,
+			"promotion_target":  heimdallBundlePromotionTarget(bundleKind, steps),
+		},
+	})
+	return spec, nil
+}
+
+func heimdallRemediationBundleStepsFromAction(bundle map[string]any, action map[string]any) ([]model.RemediationBundleStepSpec, error) {
+	rawSteps := asObjectSlice(bundle["steps"])
+	if len(rawSteps) == 0 {
+		return nil, fmt.Errorf("remediation bundle requires at least one step")
+	}
+	steps := make([]model.RemediationBundleStepSpec, 0, len(rawSteps))
+	for index, raw := range rawSteps {
+		name := firstNonEmpty(anyString(raw["name"]), fmt.Sprintf("step-%d", index+1))
+		mode := normalizeState(firstNonEmpty(anyString(raw["mode"]), anyString(raw["type"])))
+		if mode == "" {
+			if len(asObject(raw["workflow_dispatch"])) > 0 || len(asObject(raw["workflow"])) > 0 {
+				mode = model.RemediationContractActionModeWorkflowDispatch
+			} else {
+				mode = model.RemediationContractActionModeIntegrationExecute
+			}
+		}
+		step := model.RemediationBundleStepSpec{
+			Name:        name,
+			Mode:        mode,
+			Description: strings.TrimSpace(anyString(raw["description"])),
+			BlastRadius: normalizeSeverity(anyString(raw["blast_radius"])),
+			Metadata:    cloneAuthorizationInput(asObject(raw["metadata"])),
+		}
+		switch mode {
+		case model.RemediationContractActionModeWorkflowDispatch:
+			workflow := mergeStringAnyMaps(asObject(raw["workflow_dispatch"]), asObject(raw["workflow"]))
+			step.WorkflowDispatch = &model.RemediationWorkflowDispatchSpec{
+				Repository: firstNonEmpty(anyString(workflow["repository"]), anyString(action["repository"])),
+				Workflow:   firstNonEmpty(anyString(workflow["workflow"]), defaultHeimdallDispatchWorkflow),
+				Ref:        firstNonEmpty(anyString(workflow["ref"]), defaultHeimdallDispatchBranch),
+				Inputs:     cloneAuthorizationInput(asObject(workflow["inputs"])),
+			}
+		case model.RemediationContractActionModeIntegrationExecute:
+			execute := mergeStringAnyMaps(asObject(raw["integration_execute"]), raw)
+			selector := model.ManifestSelector{
+				ManifestID: anyString(execute["manifest_id"]),
+				Namespace:  firstNonEmpty(anyString(execute["namespace"]), firstNonEmpty(anyString(asObject(execute["integration"])["namespace"]), "global")),
+				Name:       firstNonEmpty(anyString(execute["name"]), anyString(asObject(execute["integration"])["name"])),
+			}
+			step.IntegrationExecute = &model.RemediationIntegrationExecuteSpec{
+				Integration: selector,
+				Operation:   firstNonEmpty(anyString(execute["operation"]), anyString(raw["operation"])),
+				Capability:  firstNonEmpty(anyString(execute["capability"]), anyString(raw["capability"])),
+				Input:       cloneAuthorizationInput(asObject(firstNonEmptyMap(execute["input"], raw["input"]))),
+			}
+		default:
+			return nil, fmt.Errorf("remediation bundle step %q mode %q is unsupported", name, mode)
+		}
+		steps = append(steps, step)
+	}
+	return steps, nil
+}
+
+func executeHeimdallRemediationBundle(
+	ctx context.Context,
+	conn *amqp.Connection,
+	db *sql.DB,
+	action map[string]any,
+	repositoryBindings map[string]heimdallRepositoryBinding,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+	options heimdallExecutionOptions,
+) error {
+	action, bundle, err := ensureHeimdallRemediationBundleAction(ctx, db, action, policy, source, options)
+	if err != nil {
+		return err
+	}
+	if bundle.Manifest.ID == uuid.Nil {
+		return fmt.Errorf("remediation bundle is missing")
+	}
+
+	expiresAt, err := time.Parse(time.RFC3339, bundle.Spec.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("parse remediation bundle expires_at: %w", err)
+	}
+	if time.Now().UTC().After(expiresAt) {
+		_, updateErr := updateHeimdallRemediationBundleStatus(ctx, db, bundle, model.RemediationBundleStatusExpired, nil, fmt.Errorf("bundle expired before execution"))
+		if updateErr != nil {
+			return updateErr
+		}
+		return fmt.Errorf("remediation bundle %s/%s expired before execution", bundle.Manifest.Metadata.Namespace, bundle.Manifest.Metadata.Name)
+	}
+
+	bundle, err = updateHeimdallRemediationBundleStatus(ctx, db, bundle, model.RemediationBundleStatusExecuting, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	executedSteps := make([]string, 0, len(bundle.Spec.Steps))
+	for _, step := range bundle.Spec.Steps {
+		switch step.Mode {
+		case model.RemediationContractActionModeWorkflowDispatch:
+			if err := executeHeimdallBundleWorkflowDispatch(ctx, conn, db, action, step, source); err != nil {
+				_, updateErr := updateHeimdallRemediationBundleStatus(ctx, db, bundle, model.RemediationBundleStatusExecutionFailed, executedSteps, err)
+				if updateErr != nil {
+					return updateErr
+				}
+				return err
+			}
+		case model.RemediationContractActionModeIntegrationExecute:
+			if err := executeHeimdallBundleIntegrationExecute(ctx, conn, db, action, step, source); err != nil {
+				_, updateErr := updateHeimdallRemediationBundleStatus(ctx, db, bundle, model.RemediationBundleStatusExecutionFailed, executedSteps, err)
+				if updateErr != nil {
+					return updateErr
+				}
+				return err
+			}
+		default:
+			err := fmt.Errorf("remediation bundle step mode %q is unsupported", step.Mode)
+			_, updateErr := updateHeimdallRemediationBundleStatus(ctx, db, bundle, model.RemediationBundleStatusExecutionFailed, executedSteps, err)
+			if updateErr != nil {
+				return updateErr
+			}
+			return err
+		}
+		executedSteps = append(executedSteps, step.Name)
+	}
+
+	_, err = updateHeimdallRemediationBundleStatus(ctx, db, bundle, model.RemediationBundleStatusExecuted, executedSteps, nil)
+	return err
+}
+
+func executeHeimdallBundleWorkflowDispatch(
+	ctx context.Context,
+	conn *amqp.Connection,
+	db *sql.DB,
+	action map[string]any,
+	step model.RemediationBundleStepSpec,
+	source string,
+) error {
+	if step.WorkflowDispatch == nil {
+		return fmt.Errorf("workflow_dispatch remediation bundle step is missing workflow_dispatch settings")
+	}
+	inputs := mergeStringAnyMaps(
+		cloneAuthorizationInput(step.WorkflowDispatch.Inputs),
+		map[string]any{
+			"incident_title":      firstNonEmpty(anyString(action["incident_title"]), anyString(action["title"])),
+			"component_kind":      firstNonEmpty(anyString(action["component_kind"]), anyString(action["kind"])),
+			"component_name":      firstNonEmpty(anyString(action["component_name"]), anyString(action["name"])),
+			"component_namespace": firstNonEmpty(anyString(action["component_namespace"]), anyString(action["namespace"]), "global"),
+			"reason":              firstNonEmpty(anyString(action["reason"]), anyString(action["description"]), source),
+			"remediation_payload": heimdallActionPayload(action),
+		},
+	)
+	_, err := executeIntegrationRequest(ctx, conn, db, model.ExecuteIntegrationRequest{
+		Integration: model.ManifestSelector{
+			Namespace: "global",
+			Name:      "github-caller",
+		},
+		Operation:  "dispatch_workflow",
+		Capability: "dispatch_workflow",
+		Input: map[string]any{
+			"repository": step.WorkflowDispatch.Repository,
+			"workflow":   step.WorkflowDispatch.Workflow,
+			"ref":        step.WorkflowDispatch.Ref,
+			"inputs":     inputs,
+		},
+		Metadata: map[string]any{
+			"source": "core.heimdall.remediation_bundle",
+			"action": action,
+			"step":   step.Name,
+		},
+	}, 0)
+	return err
+}
+
+func executeHeimdallBundleIntegrationExecute(
+	ctx context.Context,
+	conn *amqp.Connection,
+	db *sql.DB,
+	action map[string]any,
+	step model.RemediationBundleStepSpec,
+	source string,
+) error {
+	if step.IntegrationExecute == nil {
+		return fmt.Errorf("integration_execute remediation bundle step is missing integration_execute settings")
+	}
+	input := mergeStringAnyMaps(
+		cloneAuthorizationInput(step.IntegrationExecute.Input),
+		map[string]any{
+			"source":              source,
+			"component_kind":      firstNonEmpty(anyString(action["component_kind"]), anyString(action["kind"])),
+			"component_namespace": firstNonEmpty(anyString(action["component_namespace"]), anyString(action["namespace"]), "global"),
+			"component_name":      firstNonEmpty(anyString(action["component_name"]), anyString(action["name"])),
+			"reason":              firstNonEmpty(anyString(action["reason"]), anyString(action["description"]), source),
+		},
+	)
+	_, err := executeIntegrationRequest(ctx, conn, db, model.ExecuteIntegrationRequest{
+		Integration: step.IntegrationExecute.Integration,
+		Operation:   step.IntegrationExecute.Operation,
+		Capability:  step.IntegrationExecute.Capability,
+		Input:       input,
+		Metadata: map[string]any{
+			"source": "core.heimdall.remediation_bundle",
+			"action": action,
+			"step":   step.Name,
+		},
+	}, 0)
+	return err
+}
+
+func updateHeimdallRemediationBundleStatus(
+	ctx context.Context,
+	db *sql.DB,
+	current heimdallRemediationBundle,
+	status string,
+	executedSteps []string,
+	executionErr error,
+) (heimdallRemediationBundle, error) {
+	current.Spec = manifestengine.NormalizeRemediationBundleSpec(current.Spec)
+	current.Spec.Status = status
+	if current.Spec.Metadata == nil {
+		current.Spec.Metadata = map[string]any{}
+	}
+	current.Spec.Metadata["last_status_at"] = time.Now().UTC().Format(time.RFC3339)
+	current.Spec.Execution.AttemptedAt = firstNonEmpty(current.Spec.Execution.AttemptedAt, time.Now().UTC().Format(time.RFC3339))
+	switch status {
+	case model.RemediationBundleStatusExecuting:
+		current.Spec.Execution.AttemptedAt = time.Now().UTC().Format(time.RFC3339)
+		current.Spec.Execution.CompletedAt = ""
+		current.Spec.Execution.Error = ""
+	case model.RemediationBundleStatusExecuted, model.RemediationBundleStatusExecutionFailed, model.RemediationBundleStatusRejected, model.RemediationBundleStatusExpired, model.RemediationBundleStatusApproved:
+		current.Spec.Execution.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+		if executionErr != nil {
+			current.Spec.Execution.Error = strings.TrimSpace(executionErr.Error())
+		} else {
+			current.Spec.Execution.Error = ""
+		}
+	}
+	if executedSteps != nil {
+		current.Spec.Execution.ExecutedSteps = cloneStringSlice(executedSteps)
+	}
+
+	specRaw, err := json.Marshal(current.Spec)
+	if err != nil {
+		return heimdallRemediationBundle{}, fmt.Errorf("marshal remediation_bundle spec: %w", err)
+	}
+	manifestRecord, err := heimdallCreateManifestVersion(ctx, db, model.ManifestDocument{
+		APIVersion: current.Manifest.APIVersion,
+		Kind:       current.Manifest.Kind,
+		Metadata: model.ManifestMetadataInput{
+			Name:        current.Manifest.Metadata.Name,
+			Namespace:   current.Manifest.Metadata.Namespace,
+			Description: current.Manifest.Metadata.Description,
+			Labels: map[string]string{
+				"guardian":         "heimdall",
+				"bundle_kind":      current.Spec.BundleKind,
+				"bundle_status":    current.Spec.Status,
+				"component_kind":   current.Spec.ComponentKind,
+				"component_name":   current.Spec.ComponentName,
+				"component_ns":     current.Spec.ComponentNamespace,
+				"bundle_source":    current.Spec.Source,
+				"promotion_target": strings.TrimSpace(anyString(current.Spec.Metadata["promotion_target"])),
+			},
+		},
+		Spec: specRaw,
+	})
+	if err != nil {
+		return heimdallRemediationBundle{}, err
+	}
+	current.Manifest = manifestRecord
+	return current, nil
+}
+
+func updateHeimdallApprovalLinkedBundle(
+	ctx context.Context,
+	db *sql.DB,
+	namespace string,
+	name string,
+	approvalManifest model.Manifest,
+) error {
+	manifestRecord, err := repository.ResolveManifest(ctx, db, "remediation_bundle", namespace, name, nil, true)
+	if err != nil {
+		return err
+	}
+	spec, err := manifestengine.ParseRemediationBundleSpec(manifestRecord.Spec)
+	if err != nil {
+		return err
+	}
+	spec = manifestengine.NormalizeRemediationBundleSpec(spec)
+	if spec.Metadata == nil {
+		spec.Metadata = map[string]any{}
+	}
+	spec.Metadata["approval_name"] = approvalManifest.Metadata.Name
+	spec.Metadata["approval_namespace"] = approvalManifest.Metadata.Namespace
+	spec.Metadata["approval_status"] = model.GuardianApprovalStatusPending
+	_, err = updateHeimdallRemediationBundleStatus(ctx, db, heimdallRemediationBundle{
+		Manifest: manifestRecord,
+		Spec:     spec,
+	}, model.RemediationBundleStatusPendingApproval, spec.Execution.ExecutedSteps, nil)
+	return err
+}
+
+func UpdateHeimdallApprovalBundleStatus(
+	ctx context.Context,
+	db *sql.DB,
+	approval model.GuardianApprovalManifestSpec,
+	status string,
+) error {
+	bundleName := strings.TrimSpace(anyString(approval.Metadata["bundle_name"]))
+	if bundleName == "" {
+		return nil
+	}
+	bundleNS := firstNonEmpty(anyString(approval.Metadata["bundle_namespace"]), "global")
+	manifestRecord, err := repository.ResolveManifest(ctx, db, "remediation_bundle", bundleNS, bundleName, nil, true)
+	if err != nil {
+		return err
+	}
+	spec, err := manifestengine.ParseRemediationBundleSpec(manifestRecord.Spec)
+	if err != nil {
+		return err
+	}
+	spec = manifestengine.NormalizeRemediationBundleSpec(spec)
+	nextStatus := model.RemediationBundleStatusApproved
+	switch strings.TrimSpace(status) {
+	case model.GuardianApprovalStatusRejected:
+		nextStatus = model.RemediationBundleStatusRejected
+	case model.GuardianApprovalStatusApproved:
+		nextStatus = model.RemediationBundleStatusApproved
+	}
+	if spec.Metadata == nil {
+		spec.Metadata = map[string]any{}
+	}
+	spec.Metadata["approval_status"] = strings.TrimSpace(status)
+	_, err = updateHeimdallRemediationBundleStatus(ctx, db, heimdallRemediationBundle{
+		Manifest: manifestRecord,
+		Spec:     spec,
+	}, nextStatus, spec.Execution.ExecutedSteps, nil)
+	return err
+}
+
+func heimdallRemediationBundleRef(manifestRecord model.Manifest, spec model.RemediationBundleManifestSpec) map[string]any {
+	return map[string]any{
+		"id":               manifestRecord.ID.String(),
+		"namespace":        manifestRecord.Metadata.Namespace,
+		"name":             manifestRecord.Metadata.Name,
+		"status":           spec.Status,
+		"bundle_kind":      spec.BundleKind,
+		"expires_at":       spec.ExpiresAt,
+		"promotion_target": anyString(spec.Metadata["promotion_target"]),
+	}
+}
+
+func heimdallGeneratedBundleKindAllowed(kind string, policy model.GuardianGeneratedBundlePolicySpec) bool {
+	switch normalizeState(kind) {
+	case model.RemediationBundleKindWorkflowPatch:
+		return policy.AllowWorkflowPatch
+	case model.RemediationBundleKindIntegrationComposition:
+		return policy.AllowIntegrationComposition
+	case model.RemediationBundleKindEphemeralExecutor:
+		return policy.AllowEphemeralExecutor
+	default:
+		return false
+	}
+}
+
+func heimdallBundlePromotionTarget(kind string, steps []model.RemediationBundleStepSpec) string {
+	if len(steps) == 1 {
+		switch steps[0].Mode {
+		case model.RemediationContractActionModeWorkflowDispatch, model.RemediationContractActionModeIntegrationExecute:
+			return "learned_lightweight"
+		}
+	}
+	switch normalizeState(kind) {
+	case model.RemediationBundleKindIntegrationComposition:
+		return "remediation_contract"
+	case model.RemediationBundleKindEphemeralExecutor:
+		return "capability_formalization"
+	default:
+		return "learned_lightweight"
+	}
+}
+
+func normalizeHeimdallRemediationBundleName(componentKind, componentName, bundleKind string, now time.Time) string {
+	componentKind = normalizeState(componentKind)
+	componentName = normalizeIntegrationToken(componentName)
+	bundleKind = normalizeState(bundleKind)
+	return fmt.Sprintf("heimdall-%s-%s-%s-%s", componentKind, componentName, bundleKind, now.UTC().Format("20060102150405"))
+}
+
+func firstNonEmptyMap(values ...any) map[string]any {
+	for _, value := range values {
+		item := asObject(value)
+		if len(item) > 0 {
+			return item
+		}
+	}
+	return nil
 }
 
 func executeHeimdallContractAction(
@@ -2452,6 +3011,66 @@ func anyString(value any) string {
 		return strings.TrimSpace(typed)
 	default:
 		return ""
+	}
+}
+
+func anyInt(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		value, _ := typed.Int64()
+		return int(value)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err == nil {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func positiveInt(value int, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func asObject(value any) map[string]any {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	return cloneAuthorizationInput(object)
+}
+
+func asObjectSlice(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		items := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			items = append(items, cloneAuthorizationInput(item))
+		}
+		return items
+	case []any:
+		items := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			object, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			items = append(items, cloneAuthorizationInput(object))
+		}
+		return items
+	default:
+		return nil
 	}
 }
 
@@ -3401,6 +4020,14 @@ func heimdallPolicyInput(policy model.GuardianPolicyManifestSpec) map[string]any
 		"repository_automation": map[string]any{
 			"allow_pull_request_automation": policy.RepositoryAutomation.AllowPullRequestAutomation,
 			"allow_direct_push":             policy.RepositoryAutomation.AllowDirectPush,
+		},
+		"generated_bundles": map[string]any{
+			"enabled":                       policy.GeneratedBundles.Enabled,
+			"require_approval":              policy.GeneratedBundles.RequireApproval,
+			"max_ttl_seconds":               policy.GeneratedBundles.MaxTTLSeconds,
+			"allow_workflow_patch":          policy.GeneratedBundles.AllowWorkflowPatch,
+			"allow_integration_composition": policy.GeneratedBundles.AllowIntegrationComposition,
+			"allow_ephemeral_executor":      policy.GeneratedBundles.AllowEphemeralExecutor,
 		},
 		"cost_optimization": map[string]any{
 			"enabled":                           policy.CostOptimization.Enabled,

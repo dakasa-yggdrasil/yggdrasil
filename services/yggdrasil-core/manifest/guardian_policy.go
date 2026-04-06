@@ -60,6 +60,15 @@ func ValidateGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) error {
 	if spec.Autonomy.ManualReviewBelowConfidence > spec.Autonomy.AutoExecuteMinConfidence {
 		return fmt.Errorf("guardian_policy autonomy manual_review_below_confidence must be <= auto_execute_min_confidence")
 	}
+	if spec.GeneratedBundles.MaxTTLSeconds < 0 {
+		return fmt.Errorf("guardian_policy generated_bundles max_ttl_seconds must be >= 0")
+	}
+	if spec.GeneratedBundles.Enabled &&
+		!spec.GeneratedBundles.AllowWorkflowPatch &&
+		!spec.GeneratedBundles.AllowIntegrationComposition &&
+		!spec.GeneratedBundles.AllowEphemeralExecutor {
+		return fmt.Errorf("guardian_policy generated_bundles must allow at least one bundle kind when enabled")
+	}
 	if supportedGuardianSeverityRank(spec.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius) == 0 {
 		return fmt.Errorf("guardian_policy autonomy protected_environments.max_auto_execute_blast_radius %q is unsupported", spec.Autonomy.ProtectedEnvironments.MaxAutoExecuteBlastRadius)
 	}
@@ -180,6 +189,18 @@ func NormalizeGuardianPolicySpec(spec model.GuardianPolicyManifestSpec) model.Gu
 	}
 	if spec.Autonomy.ManualReviewBelowConfidence > spec.Autonomy.AutoExecuteMinConfidence {
 		spec.Autonomy.ManualReviewBelowConfidence = spec.Autonomy.AutoExecuteMinConfidence
+	}
+	if spec.GeneratedBundles.MaxTTLSeconds < 0 {
+		spec.GeneratedBundles.MaxTTLSeconds = 0
+	}
+	if spec.GeneratedBundles.MaxTTLSeconds == 0 {
+		spec.GeneratedBundles.MaxTTLSeconds = 7200
+	}
+	if spec.GeneratedBundles.Enabled &&
+		!spec.GeneratedBundles.AllowWorkflowPatch &&
+		!spec.GeneratedBundles.AllowIntegrationComposition &&
+		!spec.GeneratedBundles.AllowEphemeralExecutor {
+		spec.GeneratedBundles.AllowIntegrationComposition = true
 	}
 	spec.Autonomy.ProtectedEnvironments.Environments = normalizeGuardianEnvironmentList(spec.Autonomy.ProtectedEnvironments.Environments)
 	if len(spec.Autonomy.ProtectedEnvironments.Environments) == 0 {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -436,7 +437,13 @@ func ResolveSecretRefs(ctx context.Context, db *sql.DB, input any) (any, error) 
 		return resolved, nil
 	case map[string]any:
 		resolved := make(map[string]any, len(value))
-		for key, item := range value {
+		keys := make([]string, 0, len(value))
+		for key := range value {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			item := value[key]
 			next, err := ResolveSecretRefs(ctx, db, item)
 			if err != nil {
 				return nil, err

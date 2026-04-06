@@ -189,6 +189,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/guardian-approvals", server.handleGuardianApprovalCreate)
 	mux.HandleFunc("POST /api/v1/guardian-approvals/{namespace}/{name}/decision", server.handleGuardianApprovalDecision)
 	mux.HandleFunc("GET /api/v1/guardian-memories", server.handleGuardianMemoryList)
+	mux.HandleFunc("GET /api/v1/remediation-bundles", server.handleRemediationBundleList)
 	mux.HandleFunc("POST /api/v1/guardian-memories/review", server.handleGuardianMemoryReview)
 	mux.HandleFunc("GET /api/v1/remediation-contracts", server.handleRemediationContractList)
 	mux.HandleFunc("POST /api/v1/remediation-contracts", server.handleRemediationContractCreate)
@@ -232,6 +233,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/console/guardian-approvals", server.handleGuardianApprovalCreate)
 	mux.HandleFunc("POST /api/v1/console/guardian-approvals/{namespace}/{name}/decision", server.handleGuardianApprovalDecision)
 	mux.HandleFunc("GET /api/v1/console/guardian-memories", server.handleGuardianMemoryList)
+	mux.HandleFunc("GET /api/v1/console/remediation-bundles", server.handleRemediationBundleList)
 	mux.HandleFunc("POST /api/v1/console/guardian-memories/review", server.handleGuardianMemoryReview)
 	mux.HandleFunc("GET /api/v1/console/remediation-contracts", server.handleRemediationContractList)
 	mux.HandleFunc("POST /api/v1/console/remediation-contracts", server.handleRemediationContractCreate)
@@ -693,6 +695,10 @@ func (s *Server) handleGuardianMemoryList(w http.ResponseWriter, r *http.Request
 	s.handleManifestList(w, r, "guardian_memory")
 }
 
+func (s *Server) handleRemediationBundleList(w http.ResponseWriter, r *http.Request) {
+	s.handleManifestList(w, r, "remediation_bundle")
+}
+
 func (s *Server) handleGuardianMemoryReview(w http.ResponseWriter, r *http.Request) {
 	var req guardianMemoryReviewRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -838,7 +844,16 @@ func (s *Server) handleGuardianApprovalDecision(w http.ResponseWriter, r *http.R
 			writeMappedError(w, err)
 			return
 		}
+		if err := messagecontroller.UpdateHeimdallApprovalBundleStatus(r.Context(), s.db, spec, status); err != nil {
+			writeMappedError(w, err)
+			return
+		}
 		writeJSON(w, http.StatusCreated, map[string]any{"manifest": updatedManifest})
+		return
+	}
+
+	if err := messagecontroller.UpdateHeimdallApprovalBundleStatus(r.Context(), s.db, spec, status); err != nil {
+		writeMappedError(w, err)
 		return
 	}
 

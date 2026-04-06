@@ -6,6 +6,7 @@ type GuardianPolicyManifestSpec struct {
 	Scope                string                                 `json:"scope,omitempty"`
 	AutoHeal             GuardianAutoHealPolicySpec             `json:"auto_heal,omitempty"`
 	Autonomy             GuardianAutonomyPolicySpec             `json:"autonomy,omitempty"`
+	GeneratedBundles     GuardianGeneratedBundlePolicySpec      `json:"generated_bundles,omitempty"`
 	MaintenanceMode      GuardianMaintenanceModePolicySpec      `json:"maintenance_mode,omitempty"`
 	Escalation           GuardianEscalationPolicySpec           `json:"escalation,omitempty"`
 	RepositoryAutomation GuardianRepositoryAutomationPolicySpec `json:"repository_automation,omitempty"`
@@ -49,6 +50,17 @@ type GuardianAutonomyPolicySpec struct {
 	ProtectedEnvironments       GuardianProtectedEnvironmentPolicySpec `json:"protected_environments,omitempty"`
 	BusinessHours               GuardianBusinessHoursPolicySpec        `json:"business_hours,omitempty"`
 	FreezeWindows               []GuardianFreezeWindowPolicySpec       `json:"freeze_windows,omitempty"`
+}
+
+// GuardianGeneratedBundlePolicySpec constrains when Heimdall may generate a
+// temporary remediation bundle from the LLM fallback path.
+type GuardianGeneratedBundlePolicySpec struct {
+	Enabled                     bool `json:"enabled,omitempty"`
+	RequireApproval             bool `json:"require_approval,omitempty"`
+	MaxTTLSeconds               int  `json:"max_ttl_seconds,omitempty"`
+	AllowWorkflowPatch          bool `json:"allow_workflow_patch,omitempty"`
+	AllowIntegrationComposition bool `json:"allow_integration_composition,omitempty"`
+	AllowEphemeralExecutor      bool `json:"allow_ephemeral_executor,omitempty"`
 }
 
 // GuardianMaintenanceModePolicySpec blocks or limits autonomous changes during
