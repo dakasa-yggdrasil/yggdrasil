@@ -200,7 +200,7 @@ func runHeimdallGuardianSweep(
 		return
 	}
 
-	snapshot, err := buildHeimdallEcosystemSnapshot(ctx, db, repositoryBindings)
+	snapshot, err := buildHeimdallEcosystemSnapshot(ctx, db, repositoryBindings, remediationContracts)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("heimdall guardian sweep failed to build ecosystem snapshot", zap.Error(err))
@@ -465,6 +465,34 @@ func loadHeimdallRemediationContracts(ctx context.Context, db *sql.DB) (map[stri
 	return contracts, nil
 }
 
+func heimdallRemediationContractActionNames(
+	contracts map[string]heimdallRemediationContract,
+	componentKind string,
+	componentNamespace string,
+	componentName string,
+) []string {
+	contract, ok := contracts[heimdallComponentKey(componentKind, componentNamespace, componentName)]
+	if !ok {
+		return nil
+	}
+
+	names := make([]string, 0, len(contract.Spec.Actions))
+	seen := map[string]struct{}{}
+	for _, action := range contract.Spec.Actions {
+		name := strings.ToLower(strings.TrimSpace(action.Name))
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func loadHeimdallGuardianMemories(ctx context.Context, db *sql.DB) ([]heimdallGuardianMemory, error) {
 	manifests, err := repository.ListManifests(ctx, db, model.ListManifestFilters{
 		Kind:       "guardian_memory",
@@ -537,6 +565,7 @@ func buildHeimdallEcosystemSnapshot(
 	ctx context.Context,
 	db *sql.DB,
 	repositoryBindings map[string]heimdallRepositoryBinding,
+	remediationContracts map[string]heimdallRemediationContract,
 ) (map[string]any, error) {
 	integrationTypeSpecs, err := loadHeimdallIntegrationTypeSpecs(ctx, db)
 	if err != nil {
@@ -569,6 +598,14 @@ func buildHeimdallEcosystemSnapshot(
 		}
 		if binding, ok := repositoryBindings[heimdallComponentKey("integration", manifestRecord.Metadata.Namespace, manifestRecord.Metadata.Name)]; ok {
 			item = mergeStringAnyMaps(item, heimdallRepositoryBindingMetadata(binding))
+		}
+		if actionNames := heimdallRemediationContractActionNames(
+			remediationContracts,
+			"integration",
+			manifestRecord.Metadata.Namespace,
+			manifestRecord.Metadata.Name,
+		); len(actionNames) > 0 {
+			item["remediation_contract_actions"] = actionNames
 		}
 		typeSpec := integrationTypeSpecs[heimdallManifestKey(health.IntegrationType.Namespace, health.IntegrationType.Name)]
 		if representative := health.RuntimeState; representative != nil {
@@ -611,6 +648,14 @@ func buildHeimdallEcosystemSnapshot(
 		}
 		if binding, ok := repositoryBindings[heimdallComponentKey("surface", manifestRecord.Metadata.Namespace, manifestRecord.Metadata.Name)]; ok {
 			item = mergeStringAnyMaps(item, heimdallRepositoryBindingMetadata(binding))
+		}
+		if actionNames := heimdallRemediationContractActionNames(
+			remediationContracts,
+			"surface",
+			manifestRecord.Metadata.Namespace,
+			manifestRecord.Metadata.Name,
+		); len(actionNames) > 0 {
+			item["remediation_contract_actions"] = actionNames
 		}
 		surfaces = append(surfaces, item)
 	}
@@ -1066,6 +1111,10 @@ func executeHeimdallActionWithOptions(
 	case "remediation_bundle":
 		err = executeHeimdallRemediationBundle(ctx, conn, db, action, repositoryBindings, policy, source, options)
 	default:
+		if _, _, contractErr := resolveHeimdallContractAction(action, remediationContracts); contractErr == nil {
+			err = executeHeimdallContractAction(ctx, conn, db, action, repositoryBindings, remediationContracts, policy, source, options)
+			break
+		}
 		err = fmt.Errorf("heimdall action type %q is not executable by the core loop", actionType)
 	}
 

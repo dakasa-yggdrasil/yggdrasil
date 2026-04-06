@@ -1,0 +1,74 @@
+{
+  "apiVersion": "yggdrasil.io/v1alpha1",
+  "kind": "remediation_contract",
+  "metadata": {
+    "name": "kubernetes-platform-prod-capacity-scheduling-hotfix",
+    "namespace": "global",
+    "description": "Bounded remediation contract for scheduling failures on the production Kubernetes platform integration.",
+    "labels": {
+      "bootstrap_source": "integration-kubernetes",
+      "component_kind": "integration"
+    }
+  },
+  "spec": {
+    "component_kind": "integration",
+    "component_namespace": "global",
+    "component_name": "kubernetes-platform-prod",
+    "actions": [
+      {
+        "name": "capacity_scheduling_hotfix",
+        "mode": "integration_execute",
+        "auto_execute": true,
+        "integration_execute": {
+          "integration": {
+            "namespace": "global",
+            "name": "kubernetes-platform-prod"
+          },
+          "operation": "declarative_apply",
+          "capability": "declarative_apply",
+          "input": {
+            "namespace": "yggdrasil-system",
+            "reconcile": {
+              "strategy": "server_side_apply",
+              "wait": false,
+              "prune": false
+            },
+            "objects": [
+              {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "metadata": {
+                  "name": "integration-kubernetes",
+                  "namespace": "yggdrasil-system"
+                },
+                "spec": {
+                  "template": {
+                    "spec": {
+                      "containers": [
+                        {
+                          "name": "integration-kubernetes",
+                          "resources": {
+                            "requests": {
+                              "cpu": "500m"
+                            },
+                            "limits": {
+                              "cpu": "1000m"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "metadata": {
+      "environment": "production",
+      "provider": "kubernetes"
+    }
+  }
+}

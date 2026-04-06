@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -193,6 +194,29 @@ func TestResolveHeimdallContractAction(t *testing.T) {
 	}
 	if action.Name != "rightsize_component" {
 		t.Fatalf("action name = %q, want rightsize_component", action.Name)
+	}
+}
+
+func TestHeimdallRemediationContractActionNamesReturnsSortedUniqueNames(t *testing.T) {
+	contracts := map[string]heimdallRemediationContract{
+		heimdallComponentKey("integration", "global", "kubernetes-platform-prod"): {
+			Spec: model.RemediationContractManifestSpec{
+				ComponentKind:      "integration",
+				ComponentNamespace: "global",
+				ComponentName:      "kubernetes-platform-prod",
+				Actions: []model.RemediationContractActionSpec{
+					{Name: "capacity_scheduling_hotfix"},
+					{Name: "rightsize_component"},
+					{Name: "capacity_scheduling_hotfix"},
+				},
+			},
+		},
+	}
+
+	got := heimdallRemediationContractActionNames(contracts, "integration", "global", "kubernetes-platform-prod")
+	want := []string{"capacity_scheduling_hotfix", "rightsize_component"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("action names = %#v, want %#v", got, want)
 	}
 }
 
