@@ -62,6 +62,17 @@ type guardianApprovalDecisionRequest struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+type guardianMemoryReviewRequest struct {
+	Namespace        string `json:"namespace,omitempty"`
+	ActionType       string `json:"action_type"`
+	PatternKind      string `json:"pattern_kind,omitempty"`
+	PatternValue     string `json:"pattern_value,omitempty"`
+	IncidentCategory string `json:"incident_category,omitempty"`
+	ProviderGroup    string `json:"provider_group,omitempty"`
+	ReviewStatus     string `json:"review_status"`
+	Comment          string `json:"comment,omitempty"`
+}
+
 type integrationCatalogResponse struct {
 	Domains []model.IntegrationCatalogDomain `json:"domains"`
 }
@@ -178,6 +189,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/guardian-approvals", server.handleGuardianApprovalCreate)
 	mux.HandleFunc("POST /api/v1/guardian-approvals/{namespace}/{name}/decision", server.handleGuardianApprovalDecision)
 	mux.HandleFunc("GET /api/v1/guardian-memories", server.handleGuardianMemoryList)
+	mux.HandleFunc("POST /api/v1/guardian-memories/review", server.handleGuardianMemoryReview)
 	mux.HandleFunc("GET /api/v1/remediation-contracts", server.handleRemediationContractList)
 	mux.HandleFunc("POST /api/v1/remediation-contracts", server.handleRemediationContractCreate)
 	mux.HandleFunc("GET /api/v1/surfaces", server.handleSurfaceList)
@@ -220,6 +232,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/console/guardian-approvals", server.handleGuardianApprovalCreate)
 	mux.HandleFunc("POST /api/v1/console/guardian-approvals/{namespace}/{name}/decision", server.handleGuardianApprovalDecision)
 	mux.HandleFunc("GET /api/v1/console/guardian-memories", server.handleGuardianMemoryList)
+	mux.HandleFunc("POST /api/v1/console/guardian-memories/review", server.handleGuardianMemoryReview)
 	mux.HandleFunc("GET /api/v1/console/remediation-contracts", server.handleRemediationContractList)
 	mux.HandleFunc("POST /api/v1/console/remediation-contracts", server.handleRemediationContractCreate)
 	mux.HandleFunc("GET /api/v1/console/surfaces", server.handleSurfaceList)
@@ -680,6 +693,78 @@ func (s *Server) handleGuardianMemoryList(w http.ResponseWriter, r *http.Request
 	s.handleManifestList(w, r, "guardian_memory")
 }
 
+func (s *Server) handleGuardianMemoryReview(w http.ResponseWriter, r *http.Request) {
+	var req guardianMemoryReviewRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	reviewStatus := normalizeGuardianMemoryReviewStatus(req.ReviewStatus)
+	if reviewStatus == "" {
+		writeMappedError(w, fmt.Errorf("guardian memory review_status %q is unsupported", req.ReviewStatus))
+		return
+	}
+	actionType := strings.ToLower(strings.TrimSpace(req.ActionType))
+	if actionType == "" {
+		writeMappedError(w, fmt.Errorf("guardian memory action_type is required"))
+		return
+	}
+
+	namespace := firstNonEmpty(strings.TrimSpace(req.Namespace), "global")
+	manifests, err := repository.ListManifests(r.Context(), s.db, model.ListManifestFilters{
+		Kind:       "guardian_memory",
+		Namespace:  namespace,
+		ActiveOnly: true,
+	})
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	updated := make([]model.Manifest, 0)
+	for _, manifestRecord := range manifests {
+		spec, err := manifestengine.ParseGuardianMemorySpec(manifestRecord.Spec)
+		if err != nil {
+			writeMappedError(w, err)
+			return
+		}
+		spec = manifestengine.NormalizeGuardianMemorySpec(spec)
+		if !guardianMemoryMatchesPlaybookReview(spec, req) {
+			continue
+		}
+
+		spec.Metadata = applyGuardianMemoryReview(spec.Metadata, reviewStatus, req.Comment)
+		specRaw, err := json.Marshal(spec)
+		if err != nil {
+			writeMappedError(w, fmt.Errorf("marshal guardian memory spec: %w", err))
+			return
+		}
+
+		updatedManifest, err := createManifestVersion(r.Context(), s.db, model.ManifestDocument{
+			APIVersion: manifestRecord.APIVersion,
+			Kind:       manifestRecord.Kind,
+			Metadata:   manifestMetadataInputFromManifest(manifestRecord),
+			Spec:       specRaw,
+		})
+		if err != nil {
+			writeMappedError(w, err)
+			return
+		}
+		updated = append(updated, updatedManifest)
+	}
+
+	if len(updated) == 0 {
+		writeMappedError(w, repository.ErrManifestNotFound)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"updated":   len(updated),
+		"manifests": updated,
+	})
+}
+
 func (s *Server) handleGuardianApprovalDecision(w http.ResponseWriter, r *http.Request) {
 	var req guardianApprovalDecisionRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -797,12 +882,172 @@ func guardianApprovalMetadataInput(manifestRecord model.Manifest, status string)
 		labels["approval_status"] = strings.TrimSpace(status)
 	}
 
+	input := manifestMetadataInputFromManifest(manifestRecord)
+	input.Labels = labels
+	return input
+}
+
+func manifestMetadataInputFromManifest(manifestRecord model.Manifest) model.ManifestMetadataInput {
 	return model.ManifestMetadataInput{
 		Name:        manifestRecord.Metadata.Name,
 		Namespace:   manifestRecord.Metadata.Namespace,
 		Description: manifestRecord.Metadata.Description,
-		Labels:      labels,
+		Labels:      cloneStringMap(manifestRecord.Metadata.Labels),
 	}
+}
+
+func normalizeGuardianMemoryReviewStatus(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "promoted", "blocked":
+		return strings.ToLower(strings.TrimSpace(raw))
+	case "clear", "cleared", "none", "unreviewed", "":
+		return "clear"
+	default:
+		return ""
+	}
+}
+
+func applyGuardianMemoryReview(metadata map[string]any, reviewStatus, comment string) map[string]any {
+	updated := cloneAnyMap(metadata)
+	if updated == nil {
+		updated = map[string]any{}
+	}
+	switch reviewStatus {
+	case "clear":
+		delete(updated, "learned_playbook_review_status")
+		delete(updated, "learned_playbook_reviewed_at")
+		delete(updated, "learned_playbook_review_note")
+	default:
+		updated["learned_playbook_review_status"] = reviewStatus
+		updated["learned_playbook_reviewed_at"] = time.Now().UTC().Format(time.RFC3339)
+		if strings.TrimSpace(comment) != "" {
+			updated["learned_playbook_review_note"] = strings.TrimSpace(comment)
+		} else {
+			delete(updated, "learned_playbook_review_note")
+		}
+	}
+	return updated
+}
+
+func guardianMemoryMatchesPlaybookReview(
+	spec model.GuardianMemoryManifestSpec,
+	req guardianMemoryReviewRequest,
+) bool {
+	if strings.TrimSpace(req.ActionType) != "" && guardianMemoryReviewActionType(spec) != strings.ToLower(strings.TrimSpace(req.ActionType)) {
+		return false
+	}
+	if strings.TrimSpace(req.IncidentCategory) != "" && guardianMemoryReviewIncidentCategory(spec) != strings.ToLower(strings.TrimSpace(req.IncidentCategory)) {
+		return false
+	}
+	if strings.TrimSpace(req.ProviderGroup) != "" && guardianMemoryReviewProviderGroup(spec) != strings.ToLower(strings.TrimSpace(req.ProviderGroup)) {
+		return false
+	}
+
+	patternKind, patternValue := guardianMemoryReviewPattern(spec)
+	if strings.TrimSpace(req.PatternKind) != "" && patternKind != strings.ToLower(strings.TrimSpace(req.PatternKind)) {
+		return false
+	}
+	if strings.TrimSpace(req.PatternValue) != "" && patternValue != strings.ToLower(strings.TrimSpace(req.PatternValue)) {
+		return false
+	}
+	return true
+}
+
+func guardianMemoryReviewActionType(spec model.GuardianMemoryManifestSpec) string {
+	return strings.ToLower(strings.TrimSpace(stringMapValue(spec.Action, "type")))
+}
+
+func guardianMemoryReviewIncidentCategory(spec model.GuardianMemoryManifestSpec) string {
+	if value := strings.ToLower(strings.TrimSpace(stringMapValue(spec.Metadata, "incident_category"))); value != "" {
+		return value
+	}
+	return strings.ToLower(strings.TrimSpace(stringMapValue(spec.Incident, "category")))
+}
+
+func guardianMemoryReviewProviderGroup(spec model.GuardianMemoryManifestSpec) string {
+	if value := strings.ToLower(strings.TrimSpace(stringMapValue(spec.Metadata, "provider_group"))); value != "" {
+		return value
+	}
+	providerKey := strings.ToLower(strings.TrimSpace(stringMapValue(spec.Metadata, "provider_key")))
+	if providerKey == "" {
+		return "unknown"
+	}
+	parts := strings.SplitN(providerKey, ":", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+		return providerKey
+	}
+	segments := strings.Split(parts[1], "/")
+	return strings.TrimSpace(segments[len(segments)-1])
+}
+
+func guardianMemoryReviewPattern(spec model.GuardianMemoryManifestSpec) (string, string) {
+	actionType := guardianMemoryReviewActionType(spec)
+	target := objectMapValue(spec.Action, "target")
+	if actionType != "" {
+		if learnedPattern := strings.ToLower(strings.TrimSpace(stringMapValue(target, "learned_playbook_pattern"))); learnedPattern != "" {
+			segments := strings.SplitN(learnedPattern, ":", 2)
+			if len(segments) == 2 {
+				return strings.TrimSpace(segments[0]), strings.TrimSpace(segments[1])
+			}
+			return actionType, learnedPattern
+		}
+	}
+
+	switch actionType {
+	case "dispatch_workflow":
+		workflow := firstNonEmpty(
+			stringMapValue(objectMapValue(spec.Action, "workflow"), "workflow"),
+			stringMapValue(target, "workflow"),
+			"deploy.yml",
+		)
+		return "workflow_dispatch", strings.ToLower(strings.TrimSpace(workflow))
+	case "rightsize_component":
+		operation := objectMapValue(spec.Action, "operation")
+		resource := firstNonEmpty(stringMapValue(operation, "resource"), "capacity")
+		direction := firstNonEmpty(stringMapValue(operation, "direction"), "increase")
+		return "rightsize", strings.ToLower(strings.TrimSpace(resource + ":" + direction))
+	case "rotate_secret":
+		return "rotate_secret", "secret"
+	case "page_team":
+		team := firstNonEmpty(
+			stringMapValue(objectMapValue(spec.Action, "operation"), "team"),
+			stringMapValue(target, "team"),
+			"team",
+		)
+		return "page_team", strings.ToLower(strings.TrimSpace(team))
+	default:
+		return actionType, actionType
+	}
+}
+
+func stringMapValue(input map[string]any, key string) string {
+	if len(input) == 0 {
+		return ""
+	}
+	value, ok := input[key]
+	if !ok {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(text)
+}
+
+func objectMapValue(input map[string]any, key string) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	value, ok := input[key]
+	if !ok {
+		return nil
+	}
+	nested, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return nested
 }
 
 func (s *Server) handleRemediationContractList(w http.ResponseWriter, r *http.Request) {
