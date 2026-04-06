@@ -1071,6 +1071,9 @@ func executeHeimdallActionWithOptions(
 	if anyString(action["type"]) == "remediation_bundle" && policy.GeneratedBundles.RequireApproval && !options.SkipApproval {
 		decision.RequireApproval = true
 	}
+	if anyString(action["type"]) == "upsert_capacity_hotfix_profile" && policy.ProfilePromotions.RequireApproval && !options.SkipApproval {
+		decision.RequireApproval = true
+	}
 
 	if decision.Escalate {
 		return executeHeimdallEscalation(ctx, conn, db, action, repositoryBindings, policy, source, options)
@@ -1110,6 +1113,11 @@ func executeHeimdallActionWithOptions(
 		err = executeHeimdallHumanEscalation(ctx, db, action, policy, source, options)
 	case "remediation_bundle":
 		err = executeHeimdallRemediationBundle(ctx, conn, db, action, repositoryBindings, policy, source, options)
+	case "upsert_capacity_hotfix_profile":
+		if !policy.ProfilePromotions.Enabled {
+			return fmt.Errorf("heimdall guardian policy blocks capacity hotfix profile promotions")
+		}
+		err = executeHeimdallCapacityHotfixProfileUpsert(ctx, db, action)
 	default:
 		if _, _, contractErr := resolveHeimdallContractAction(action, remediationContracts); contractErr == nil {
 			err = executeHeimdallContractAction(ctx, conn, db, action, repositoryBindings, remediationContracts, policy, source, options)
@@ -1121,6 +1129,70 @@ func executeHeimdallActionWithOptions(
 	if memoryErr := finalizeHeimdallExecutionMemory(ctx, db, memory, action, err); memoryErr != nil && err == nil {
 		return memoryErr
 	}
+	return err
+}
+
+func executeHeimdallCapacityHotfixProfileUpsert(
+	ctx context.Context,
+	db *sql.DB,
+	action map[string]any,
+) error {
+	if db == nil {
+		return fmt.Errorf("database connection is required to persist capacity hotfix profiles")
+	}
+
+	profile, err := heimdallCapacityHotfixProfileFromAction(action)
+	if err != nil {
+		return err
+	}
+
+	target := asObject(action["target"])
+	guardianRef := asObject(target["guardian"])
+	guardianNamespace := firstNonEmpty(
+		anyString(guardianRef["namespace"]),
+		anyString(action["component_namespace"]),
+		defaultHeimdallGuardianNamespace,
+	)
+	guardianName := firstNonEmpty(
+		anyString(guardianRef["name"]),
+		anyString(action["component_name"]),
+		defaultHeimdallGuardianInstance,
+	)
+
+	manifestRecord, err := repository.ResolveManifest(ctx, db, "integration_instance", guardianNamespace, guardianName, nil, true)
+	if err != nil {
+		return err
+	}
+
+	spec, err := manifestengine.ParseIntegrationInstanceSpec(manifestRecord.Spec)
+	if err != nil {
+		return fmt.Errorf("parse guardian integration_instance spec: %w", err)
+	}
+	if spec.Config == nil {
+		spec.Config = map[string]any{}
+	}
+
+	existingProfiles := objectSlice(spec.Config["capacity_hotfix_profiles"])
+	spec.Config["capacity_hotfix_profiles"] = heimdallMergeCapacityHotfixProfiles(existingProfiles, profile)
+
+	specRaw, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("marshal guardian integration_instance spec: %w", err)
+	}
+
+	active := manifestRecord.Metadata.Active
+	_, err = heimdallCreateManifestVersion(ctx, db, model.ManifestDocument{
+		APIVersion: manifestRecord.APIVersion,
+		Kind:       manifestRecord.Kind,
+		Metadata: model.ManifestMetadataInput{
+			Name:        manifestRecord.Metadata.Name,
+			Namespace:   manifestRecord.Metadata.Namespace,
+			Description: manifestRecord.Metadata.Description,
+			Labels:      heimdallCloneStringMap(manifestRecord.Metadata.Labels),
+			Active:      &active,
+		},
+		Spec: specRaw,
+	})
 	return err
 }
 
@@ -4190,6 +4262,177 @@ func heimdallCreateManifestVersion(ctx context.Context, db *sql.DB, doc model.Ma
 	}
 
 	return repository.CreateManifestVersion(ctx, db, doc, checksum)
+}
+
+func heimdallCapacityHotfixProfileFromAction(action map[string]any) (map[string]any, error) {
+	profile := asObject(action["profile"])
+	if len(profile) == 0 {
+		profile = asObject(asObject(action["target"])["profile"])
+	}
+	if len(profile) == 0 {
+		return nil, fmt.Errorf("heimdall action type upsert_capacity_hotfix_profile requires a profile payload")
+	}
+
+	normalized := map[string]any{
+		"name": firstNonEmpty(anyString(profile["name"]), anyString(profile["profile_name"])),
+	}
+	if strings.TrimSpace(anyString(normalized["name"])) == "" {
+		return nil, fmt.Errorf("capacity hotfix profile name is required")
+	}
+
+	environments := heimdallStringArray(profile["environments"])
+	if len(environments) > 0 {
+		normalized["environments"] = environments
+	}
+	namespaces := heimdallStringArray(profile["namespaces"])
+	if len(namespaces) > 0 {
+		normalized["namespaces"] = namespaces
+	}
+	workloadNames := heimdallStringArray(firstNonEmptyValue(profile["workload_names"], profile["workloadNames"]))
+	if len(workloadNames) > 0 {
+		normalized["workload_names"] = workloadNames
+	}
+	workloadPrefixes := heimdallStringArray(firstNonEmptyValue(profile["workload_name_prefixes"], profile["workloadNamePrefixes"]))
+	if len(workloadPrefixes) > 0 {
+		normalized["workload_name_prefixes"] = workloadPrefixes
+	}
+
+	if value, ok := heimdallOptionalInt(firstNonEmptyValue(profile["default_request_millicores"], profile["defaultRequestMillicores"])); ok {
+		normalized["default_request_millicores"] = value
+	}
+	if value, ok := heimdallOptionalInt(firstNonEmptyValue(profile["default_limit_millicores"], profile["defaultLimitMillicores"])); ok {
+		normalized["default_limit_millicores"] = value
+	}
+	if value, ok := heimdallOptionalInt(firstNonEmptyValue(profile["max_request_delta_millicores"], profile["maxRequestDeltaMillicores"])); ok {
+		normalized["max_request_delta_millicores"] = value
+	}
+	if value, ok := heimdallOptionalInt(firstNonEmptyValue(profile["max_limit_delta_millicores"], profile["maxLimitDeltaMillicores"])); ok {
+		normalized["max_limit_delta_millicores"] = value
+	}
+
+	return normalized, nil
+}
+
+func heimdallMergeCapacityHotfixProfiles(existing []map[string]any, profile map[string]any) []map[string]any {
+	next := make([]map[string]any, 0, len(existing)+1)
+	profileName := strings.TrimSpace(anyString(profile["name"]))
+	for _, entry := range existing {
+		if strings.EqualFold(strings.TrimSpace(anyString(entry["name"])), profileName) {
+			continue
+		}
+		normalized, err := heimdallCapacityHotfixProfileFromAction(map[string]any{"profile": entry})
+		if err != nil {
+			continue
+		}
+		next = append(next, normalized)
+	}
+	next = append(next, profile)
+	sort.SliceStable(next, func(left, right int) bool {
+		return strings.TrimSpace(anyString(next[left]["name"])) < strings.TrimSpace(anyString(next[right]["name"]))
+	})
+	return next
+}
+
+func heimdallStringArray(value any) []string {
+	values := objectSliceValueToStrings(value)
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+func objectSliceValueToStrings(value any) []string {
+	items, ok := value.([]string)
+	if ok {
+		output := make([]string, 0, len(items))
+		for _, item := range items {
+			normalized := strings.TrimSpace(item)
+			if normalized == "" {
+				continue
+			}
+			output = append(output, normalized)
+		}
+		return output
+	}
+
+	rawItems, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	output := make([]string, 0, len(rawItems))
+	for _, item := range rawItems {
+		normalized := strings.TrimSpace(fmt.Sprintf("%v", item))
+		if normalized == "" {
+			continue
+		}
+		output = append(output, normalized)
+	}
+	return output
+}
+
+func heimdallOptionalInt(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int32:
+		return int(typed), true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(math.Round(typed)), true
+	case float32:
+		return int(math.Round(float64(typed))), true
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err == nil {
+			return int(parsed), true
+		}
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return 0, false
+		}
+		parsed, err := strconv.ParseFloat(trimmed, 64)
+		if err == nil {
+			return int(math.Round(parsed)), true
+		}
+	}
+	return 0, false
+}
+
+func firstNonEmptyValue(values ...any) any {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case nil:
+			continue
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return typed
+			}
+		case []string:
+			if len(typed) > 0 {
+				return typed
+			}
+		case []any:
+			if len(typed) > 0 {
+				return typed
+			}
+		default:
+			return typed
+		}
+	}
+	return nil
+}
+
+func heimdallCloneStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]string, len(input))
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
 }
 
 func firstBool(values map[string]any, keys []string, fallback bool) bool {

@@ -67,6 +67,10 @@
       "allow_rotate_secret": false,
       "allow_rightsize": true
     },
+    "profile_promotions": {
+      "enabled": true,
+      "require_approval": false
+    },
     "repository_automation": {
       "allow_pull_request_automation": false,
       "allow_direct_push": false

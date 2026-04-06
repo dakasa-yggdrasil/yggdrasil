@@ -7,6 +7,7 @@ type GuardianPolicyManifestSpec struct {
 	AutoHeal             GuardianAutoHealPolicySpec             `json:"auto_heal,omitempty"`
 	Autonomy             GuardianAutonomyPolicySpec             `json:"autonomy,omitempty"`
 	GeneratedBundles     GuardianGeneratedBundlePolicySpec      `json:"generated_bundles,omitempty"`
+	ProfilePromotions    GuardianProfilePromotionPolicySpec     `json:"profile_promotions,omitempty"`
 	MaintenanceMode      GuardianMaintenanceModePolicySpec      `json:"maintenance_mode,omitempty"`
 	Escalation           GuardianEscalationPolicySpec           `json:"escalation,omitempty"`
 	RepositoryAutomation GuardianRepositoryAutomationPolicySpec `json:"repository_automation,omitempty"`
@@ -61,6 +62,14 @@ type GuardianGeneratedBundlePolicySpec struct {
 	AllowWorkflowPatch          bool `json:"allow_workflow_patch,omitempty"`
 	AllowIntegrationComposition bool `json:"allow_integration_composition,omitempty"`
 	AllowEphemeralExecutor      bool `json:"allow_ephemeral_executor,omitempty"`
+}
+
+// GuardianProfilePromotionPolicySpec governs whether Heimdall may persist
+// learned capacity hotfix profiles directly or must request a human review
+// first.
+type GuardianProfilePromotionPolicySpec struct {
+	Enabled         bool `json:"enabled,omitempty"`
+	RequireApproval bool `json:"require_approval,omitempty"`
 }
 
 // GuardianMaintenanceModePolicySpec blocks or limits autonomous changes during

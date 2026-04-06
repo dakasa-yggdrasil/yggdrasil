@@ -262,6 +262,70 @@ func TestHeimdallBuildWorkflowInputsIncludesRemediationFields(t *testing.T) {
 	}
 }
 
+func TestHeimdallCapacityHotfixProfileFromActionNormalizesShape(t *testing.T) {
+	profile, err := heimdallCapacityHotfixProfileFromAction(map[string]any{
+		"profile": map[string]any{
+			"name":                       "payments-api-prod",
+			"environments":               []any{"prod"},
+			"namespaces":                 []any{"payments"},
+			"workloadNames":              []any{"payments-api"},
+			"workload_name_prefixes":     []any{"payments-"},
+			"defaultRequestMillicores":   900.0,
+			"default_limit_millicores":   1200.0,
+			"maxRequestDeltaMillicores":  "250",
+			"max_limit_delta_millicores": "300",
+		},
+	})
+	if err != nil {
+		t.Fatalf("heimdallCapacityHotfixProfileFromAction error: %v", err)
+	}
+
+	if got := anyString(profile["name"]); got != "payments-api-prod" {
+		t.Fatalf("name = %q, want payments-api-prod", got)
+	}
+	if got := reflect.ValueOf(profile["workload_names"]).Interface(); !reflect.DeepEqual(got, []string{"payments-api"}) {
+		t.Fatalf("workload_names = %#v, want []string{\"payments-api\"}", got)
+	}
+	if got := profile["default_request_millicores"]; got != 900 {
+		t.Fatalf("default_request_millicores = %#v, want 900", got)
+	}
+	if got := profile["max_limit_delta_millicores"]; got != 300 {
+		t.Fatalf("max_limit_delta_millicores = %#v, want 300", got)
+	}
+}
+
+func TestHeimdallMergeCapacityHotfixProfilesReplacesAndSorts(t *testing.T) {
+	merged := heimdallMergeCapacityHotfixProfiles(
+		[]map[string]any{
+			{
+				"name":                       "zeta",
+				"default_request_millicores": 500,
+			},
+			{
+				"name":                       "alpha",
+				"default_request_millicores": 250,
+			},
+		},
+		map[string]any{
+			"name":                       "alpha",
+			"default_request_millicores": 900,
+		},
+	)
+
+	if len(merged) != 2 {
+		t.Fatalf("merged len = %d, want 2", len(merged))
+	}
+	if got := anyString(merged[0]["name"]); got != "alpha" {
+		t.Fatalf("merged[0].name = %q, want alpha", got)
+	}
+	if got := merged[0]["default_request_millicores"]; got != 900 {
+		t.Fatalf("merged[0].default_request_millicores = %#v, want 900", got)
+	}
+	if got := anyString(merged[1]["name"]); got != "zeta" {
+		t.Fatalf("merged[1].name = %q, want zeta", got)
+	}
+}
+
 func TestHeimdallEscalationWorkflowActionUsesIssueWorkflowBelowPostmortemThreshold(t *testing.T) {
 	action, ok := heimdallEscalationWorkflowAction(
 		context.Background(),

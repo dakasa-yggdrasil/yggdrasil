@@ -94,6 +94,10 @@ func guardianPolicyFixture() model.GuardianPolicyManifestSpec {
 				},
 			},
 		},
+		ProfilePromotions: model.GuardianProfilePromotionPolicySpec{
+			Enabled:         true,
+			RequireApproval: true,
+		},
 		MaintenanceMode: model.GuardianMaintenanceModePolicySpec{
 			Enabled:      true,
 			Environments: []string{"production"},
