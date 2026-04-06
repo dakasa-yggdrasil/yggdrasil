@@ -91,6 +91,11 @@ tasks:
     cmds:
       - COMPOSE_PROJECT_NAME={{.PROJECT_NAME}} ./scripts/heimdall-escalation-smoke.sh
 
+  heimdall:activate:llm:
+    desc: Activate Heimdall GPT+Claude fallback and materialize the API keys into managed secrets
+    cmds:
+      - ./scripts/activate-heimdall-llm.sh
+
   install:smoke:
     desc: Validate installation-manager flows against real remote repositories in an isolated workspace
     cmds:

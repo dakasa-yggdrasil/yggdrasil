@@ -41,6 +41,7 @@ Isso gera:
 - auth providers devem preferir `client_secret` inline só no momento do cadastro
 - o core materializa isso em `managed_secret` e persiste apenas `client_secret_ref`
 - `integration_instance` segue a mesma disciplina para `credentials_ref`
+- o fallback LLM do Heimdall segue a mesma disciplina; veja [`docs/heimdall-llm-activation.md`](/Users/dakasa/projects/yggdrasil/docs/heimdall-llm-activation.md)
 
 ## Regras para deploy
 

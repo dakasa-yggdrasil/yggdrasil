@@ -150,6 +150,7 @@ Rode o smoke end-to-end do produto:
 ```bash
 task smoke
 task heimdall:smoke
+task heimdall:activate:llm
 task install:smoke
 ```
 
@@ -166,6 +167,11 @@ e confirma que o core despacha `incident-escalation.yml` e `postmortem.yml` com
 os inputs corretos. Se `integration-github` não estiver instalada no monorepo,
 o smoke sobe um runtime temporário a partir do catálogo remoto só para essa
 validação.
+
+`task heimdall:activate:llm` ativa o fallback bounded `GPT + Claude` no
+`global/heimdall-guardian` e deixa as chaves materializadas como
+`managed_secret` no core. A ativação operacional está documentada em
+[`docs/heimdall-llm-activation.md`](/Users/dakasa/projects/yggdrasil/docs/heimdall-llm-activation.md).
 
 ## Dogfooding workflows
 
