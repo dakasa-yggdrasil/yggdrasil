@@ -27,7 +27,7 @@
           "operation": "declarative_apply",
           "capability": "declarative_apply",
           "input": {
-            "namespace": "yggdrasil-system",
+            "namespace": "{{ inputs.target_workload_namespace }}",
             "reconcile": {
               "strategy": "server_side_apply",
               "wait": false,
@@ -35,24 +35,24 @@
             },
             "objects": [
               {
-                "apiVersion": "apps/v1",
-                "kind": "Deployment",
+                "apiVersion": "{{ inputs.target_workload_api_version }}",
+                "kind": "{{ inputs.target_workload_kind }}",
                 "metadata": {
-                  "name": "integration-kubernetes",
-                  "namespace": "yggdrasil-system"
+                  "name": "{{ inputs.target_workload_name }}",
+                  "namespace": "{{ inputs.target_workload_namespace }}"
                 },
                 "spec": {
                   "template": {
                     "spec": {
                       "containers": [
                         {
-                          "name": "integration-kubernetes",
+                          "name": "{{ inputs.target_container_name }}",
                           "resources": {
                             "requests": {
-                              "cpu": "500m"
+                              "cpu": "{{ inputs.target_cpu_request }}"
                             },
                             "limits": {
-                              "cpu": "1000m"
+                              "cpu": "{{ inputs.target_cpu_limit }}"
                             }
                           }
                         }

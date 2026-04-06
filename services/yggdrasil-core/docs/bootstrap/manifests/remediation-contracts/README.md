@@ -23,3 +23,8 @@ The reference contracts here currently cover two patterns:
   `deploy.yml` entrypoint
 - infrastructure-backed hotfixes, like
   `capacity_scheduling_hotfix`, executed through another authorized integration
+
+For `integration_execute` contracts, the input object may be templated from the
+Heimdall action payload. That is how bounded hotfixes can target the affected
+workload name, namespace, container, and CPU envelope without hardcoding a
+single bootstrap patch.
