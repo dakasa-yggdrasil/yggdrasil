@@ -1,6 +1,7 @@
 package message
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +172,8 @@ func TestHeimdallBuildWorkflowInputsIncludesRemediationFields(t *testing.T) {
 
 func TestHeimdallEscalationWorkflowActionUsesIssueWorkflowBelowPostmortemThreshold(t *testing.T) {
 	action, ok := heimdallEscalationWorkflowAction(
+		context.Background(),
+		nil,
 		map[string]any{
 			"type":              "dispatch_workflow",
 			"component_kind":    "product",
@@ -210,6 +213,8 @@ func TestHeimdallEscalationWorkflowActionUsesIssueWorkflowBelowPostmortemThresho
 
 func TestHeimdallEscalationWorkflowActionUsesPostmortemWorkflowAtThreshold(t *testing.T) {
 	action, ok := heimdallEscalationWorkflowAction(
+		context.Background(),
+		nil,
 		map[string]any{
 			"type":              "dispatch_workflow",
 			"component_kind":    "product",

@@ -1802,7 +1802,7 @@ func executeHeimdallEscalation(
 	}
 
 	if policy.Escalation.DispatchWorkflow {
-		escalationAction, ok := heimdallEscalationWorkflowAction(action, policy)
+		escalationAction, ok := heimdallEscalationWorkflowAction(ctx, db, action, policy)
 		if ok {
 			dispatchOptions := options
 			dispatchOptions.SkipApproval = true
@@ -2979,6 +2979,8 @@ func heimdallBuildWorkflowInputs(
 }
 
 func heimdallEscalationWorkflowAction(
+	ctx context.Context,
+	db *sql.DB,
 	action map[string]any,
 	policy model.GuardianPolicyManifestSpec,
 ) (map[string]any, bool) {
@@ -3014,7 +3016,106 @@ func heimdallEscalationWorkflowAction(
 			"postmortem_required": escalationKind == "postmortem",
 		},
 	}
+	if workflowInputs, ok := next["workflow"].(map[string]any); ok {
+		if inputs, ok := workflowInputs["inputs"].(map[string]any); ok {
+			for key, value := range heimdallEscalationBundleInputs(ctx, db, action) {
+				inputs[key] = value
+			}
+		}
+	}
 	return next, true
+}
+
+func heimdallEscalationBundleInputs(ctx context.Context, db *sql.DB, action map[string]any) map[string]any {
+	contextPayload := heimdallEscalationBundleContext(ctx, db, action)
+	if len(contextPayload) == 0 {
+		return nil
+	}
+
+	encoded, err := json.Marshal(contextPayload)
+	if err != nil {
+		return nil
+	}
+
+	creation := asObject(contextPayload["creation_reason"])
+	approval := asObject(contextPayload["approval_decision"])
+	promotion := asObject(contextPayload["promotion_review"])
+
+	return map[string]any{
+		"remediation_bundle_name":                    anyString(contextPayload["name"]),
+		"remediation_bundle_namespace":               anyString(contextPayload["namespace"]),
+		"remediation_bundle_kind":                    anyString(contextPayload["kind"]),
+		"remediation_bundle_status":                  anyString(contextPayload["status"]),
+		"remediation_bundle_summary":                 anyString(contextPayload["summary"]),
+		"remediation_bundle_context":                 string(encoded),
+		"remediation_bundle_creation_reason_summary": anyString(creation["summary"]),
+		"remediation_bundle_creation_reason_comment": anyString(creation["comment"]),
+		"remediation_bundle_approval_status":         anyString(approval["status"]),
+		"remediation_bundle_approval_summary":        anyString(approval["summary"]),
+		"remediation_bundle_approval_comment":        anyString(approval["comment"]),
+		"remediation_bundle_promotion_status":        anyString(promotion["status"]),
+		"remediation_bundle_promotion_summary":       anyString(promotion["summary"]),
+		"remediation_bundle_promotion_comment":       anyString(promotion["comment"]),
+	}
+}
+
+func heimdallEscalationBundleContext(ctx context.Context, db *sql.DB, action map[string]any) map[string]any {
+	target := asObject(action["target"])
+	ref := asObject(target["remediation_bundle"])
+	namespace := firstNonEmpty(anyString(ref["namespace"]), "global")
+	name := anyString(ref["name"])
+
+	if name != "" {
+		if manifestRecord, err := repository.ResolveManifest(ctx, db, "remediation_bundle", namespace, name, nil, true); err == nil {
+			if spec, err := manifestengine.ParseRemediationBundleSpec(manifestRecord.Spec); err == nil {
+				spec = manifestengine.NormalizeRemediationBundleSpec(spec)
+				return map[string]any{
+					"id":                manifestRecord.ID.String(),
+					"name":              manifestRecord.Metadata.Name,
+					"namespace":         manifestRecord.Metadata.Namespace,
+					"kind":              spec.BundleKind,
+					"status":            spec.Status,
+					"summary":           spec.Summary,
+					"expires_at":        spec.ExpiresAt,
+					"creation_reason":   heimdallReasonMap(spec.CreationReason),
+					"approval_decision": heimdallReasonMap(spec.ApprovalDecision),
+					"promotion_review":  heimdallReasonMap(spec.PromotionReview),
+				}
+			}
+		}
+	}
+
+	bundle := asObject(action["bundle"])
+	if len(bundle) == 0 && len(ref) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"name":            name,
+		"namespace":       namespace,
+		"kind":            firstNonEmpty(anyString(bundle["kind"]), anyString(bundle["bundle_kind"]), anyString(ref["bundle_kind"])),
+		"status":          anyString(ref["status"]),
+		"summary":         firstNonEmpty(anyString(bundle["summary"]), anyString(action["description"])),
+		"creation_reason": firstNonEmptyMap(bundle["reason"], action["bundle_reason"]),
+	}
+}
+
+func heimdallReasonMap(reason *model.RemediationBundleReasonSpec) map[string]any {
+	if reason == nil {
+		return nil
+	}
+	output := map[string]any{
+		"kind":        reason.Kind,
+		"status":      reason.Status,
+		"summary":     reason.Summary,
+		"comment":     reason.Comment,
+		"source":      reason.Source,
+		"actor":       reason.Actor,
+		"recorded_at": reason.RecordedAt,
+	}
+	if len(reason.Metadata) > 0 {
+		output["metadata"] = cloneAuthorizationInput(reason.Metadata)
+	}
+	return output
 }
 
 func heimdallWorkflowInputsFromAction(action map[string]any) map[string]any {

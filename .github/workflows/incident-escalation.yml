@@ -58,6 +58,76 @@ on:
         required: false
         default: ""
         type: string
+      remediation_bundle_name:
+        description: Optional remediation bundle name.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_namespace:
+        description: Optional remediation bundle namespace.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_kind:
+        description: Optional remediation bundle kind.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_status:
+        description: Optional remediation bundle status.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_summary:
+        description: Optional remediation bundle summary.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_context:
+        description: Optional serialized remediation bundle context.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_creation_reason_summary:
+        description: Optional remediation bundle creation reason summary.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_creation_reason_comment:
+        description: Optional remediation bundle creation reason comment.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_approval_status:
+        description: Optional remediation bundle approval status.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_approval_summary:
+        description: Optional remediation bundle approval summary.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_approval_comment:
+        description: Optional remediation bundle approval comment.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_promotion_status:
+        description: Optional remediation bundle promotion status.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_promotion_summary:
+        description: Optional remediation bundle promotion summary.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_promotion_comment:
+        description: Optional remediation bundle promotion comment.
+        required: false
+        default: ""
+        type: string
       source_run_url:
         description: Source run URL.
         required: false
@@ -104,17 +174,54 @@ jobs:
           REMEDIATION_TYPE: ${{ inputs.remediation_type }}
           REMEDIATION_CONTRACT: ${{ inputs.remediation_contract }}
           REMEDIATION_REASON: ${{ inputs.remediation_reason }}
+          REMEDIATION_BUNDLE_NAME: ${{ inputs.remediation_bundle_name }}
+          REMEDIATION_BUNDLE_NAMESPACE: ${{ inputs.remediation_bundle_namespace }}
+          REMEDIATION_BUNDLE_KIND: ${{ inputs.remediation_bundle_kind }}
+          REMEDIATION_BUNDLE_STATUS: ${{ inputs.remediation_bundle_status }}
+          REMEDIATION_BUNDLE_SUMMARY: ${{ inputs.remediation_bundle_summary }}
+          REMEDIATION_BUNDLE_CONTEXT: ${{ inputs.remediation_bundle_context }}
+          REMEDIATION_BUNDLE_CREATION_REASON_SUMMARY: ${{ inputs.remediation_bundle_creation_reason_summary }}
+          REMEDIATION_BUNDLE_CREATION_REASON_COMMENT: ${{ inputs.remediation_bundle_creation_reason_comment }}
+          REMEDIATION_BUNDLE_APPROVAL_STATUS: ${{ inputs.remediation_bundle_approval_status }}
+          REMEDIATION_BUNDLE_APPROVAL_SUMMARY: ${{ inputs.remediation_bundle_approval_summary }}
+          REMEDIATION_BUNDLE_APPROVAL_COMMENT: ${{ inputs.remediation_bundle_approval_comment }}
+          REMEDIATION_BUNDLE_PROMOTION_STATUS: ${{ inputs.remediation_bundle_promotion_status }}
+          REMEDIATION_BUNDLE_PROMOTION_SUMMARY: ${{ inputs.remediation_bundle_promotion_summary }}
+          REMEDIATION_BUNDLE_PROMOTION_COMMENT: ${{ inputs.remediation_bundle_promotion_comment }}
           SOURCE_RUN_URL: ${{ inputs.source_run_url }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           COMMIT_SHA: ${{ inputs.commit_sha }}
           POSTMORTEM_REQUIRED: ${{ inputs.postmortem_required }}
         with:
           script: |
+            function parseBundleContext(input) {
+              if (!input) return null;
+              try {
+                const parsed = JSON.parse(input);
+                return parsed && typeof parsed === 'object' ? parsed : null;
+              } catch {
+                return null;
+              }
+            }
+
+            function reasonLine(label, reason) {
+              if (!reason || typeof reason !== 'object') return null;
+              const parts = [
+                reason.summary || '',
+                reason.comment || '',
+                reason.status ? `status=${reason.status}` : '',
+                reason.source ? `source=${reason.source}` : '',
+                reason.actor ? `actor=${reason.actor}` : '',
+              ].filter(Boolean);
+              return parts.length ? `- ${label}: ${parts.join(' · ')}` : null;
+            }
+
             const component = `${process.env.COMPONENT_KIND}:${process.env.COMPONENT_NAMESPACE}:${process.env.COMPONENT_NAME}`;
             const severity = (process.env.INCIDENT_SEVERITY || 'critical').trim().toLowerCase();
             const category = (process.env.INCIDENT_CATEGORY || 'incident').trim().toLowerCase();
             const incidentTitle = (process.env.INCIDENT_TITLE || `${component} incident`).trim();
             const title = `Heimdall incident [${severity}] ${component}: ${incidentTitle}`;
+            const bundleContext = parseBundleContext(process.env.REMEDIATION_BUNDLE_CONTEXT);
             const summaryLines = [
               '## Heimdall incident escalation',
               '',
@@ -132,6 +239,32 @@ jobs:
             ];
             if (process.env.SOURCE_RUN_URL) {
               summaryLines.push(`- Source run URL: ${process.env.SOURCE_RUN_URL}`);
+            }
+            if (process.env.REMEDIATION_BUNDLE_NAME || bundleContext) {
+              summaryLines.push('', '## Remediation bundle context', '');
+              summaryLines.push(`- Bundle: \`${process.env.REMEDIATION_BUNDLE_NAMESPACE || bundleContext?.namespace || 'global'}/${process.env.REMEDIATION_BUNDLE_NAME || bundleContext?.name || 'unknown'}\``);
+              summaryLines.push(`- Kind: \`${process.env.REMEDIATION_BUNDLE_KIND || bundleContext?.kind || 'n/a'}\``);
+              summaryLines.push(`- Status: \`${process.env.REMEDIATION_BUNDLE_STATUS || bundleContext?.status || 'n/a'}\``);
+              if (process.env.REMEDIATION_BUNDLE_SUMMARY || bundleContext?.summary) {
+                summaryLines.push(`- Summary: ${process.env.REMEDIATION_BUNDLE_SUMMARY || bundleContext.summary}`);
+              }
+              const creationLine = reasonLine('Creation reason', bundleContext?.creation_reason || {
+                summary: process.env.REMEDIATION_BUNDLE_CREATION_REASON_SUMMARY,
+                comment: process.env.REMEDIATION_BUNDLE_CREATION_REASON_COMMENT,
+              });
+              if (creationLine) summaryLines.push(creationLine);
+              const approvalLine = reasonLine('Approval decision', bundleContext?.approval_decision || {
+                status: process.env.REMEDIATION_BUNDLE_APPROVAL_STATUS,
+                summary: process.env.REMEDIATION_BUNDLE_APPROVAL_SUMMARY,
+                comment: process.env.REMEDIATION_BUNDLE_APPROVAL_COMMENT,
+              });
+              if (approvalLine) summaryLines.push(approvalLine);
+              const promotionLine = reasonLine('Promotion review', bundleContext?.promotion_review || {
+                status: process.env.REMEDIATION_BUNDLE_PROMOTION_STATUS,
+                summary: process.env.REMEDIATION_BUNDLE_PROMOTION_SUMMARY,
+                comment: process.env.REMEDIATION_BUNDLE_PROMOTION_COMMENT,
+              });
+              if (promotionLine) summaryLines.push(promotionLine);
             }
             summaryLines.push('', '## Next actions', '', '- Confirm impact and current status.', '- Decide whether to execute a manual remediation or rollback.', '- Update this issue with timeline and owner.');
             const body = summaryLines.join('\n');
@@ -178,3 +311,10 @@ jobs:
           - Issue action: \`${{ steps.incident.outputs.issue_action }}\`
           - Issue: ${{ steps.incident.outputs.issue_url }}
           EOF
+
+          if [ -n "${{ inputs.remediation_bundle_name }}" ]; then
+            cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          - Remediation bundle: \`${{ inputs.remediation_bundle_namespace || 'global' }}/${{ inputs.remediation_bundle_name }}\`
+          - Bundle status: \`${{ inputs.remediation_bundle_status || 'n/a' }}\`
+          EOF
+          fi
