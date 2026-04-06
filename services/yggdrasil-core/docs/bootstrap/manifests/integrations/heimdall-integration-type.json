@@ -113,6 +113,10 @@
           "description": "Maximum bounded right-sizing step Heimdall should suggest in one action.",
           "default": 25
         },
+        "capacity_hotfix_profiles": {
+          "type": "array",
+          "description": "Optional bounded CPU hotfix profiles matched by environment, namespace, workload name, or workload name prefix."
+        },
         "llm_enabled": {
           "type": "boolean",
           "description": "Enable the constrained LLM fallback when lightweight guardian support cannot resolve the incident.",
