@@ -2145,6 +2145,9 @@ func executeHeimdallBundleWorkflowDispatch(
 			"remediation_payload": heimdallActionPayload(action),
 		},
 	)
+	if bundleInputs := heimdallEscalationBundleInputs(ctx, db, action); len(bundleInputs) > 0 {
+		inputs = mergeStringAnyMaps(inputs, bundleInputs)
+	}
 	_, err := executeIntegrationRequest(ctx, conn, db, model.ExecuteIntegrationRequest{
 		Integration: model.ManifestSelector{
 			Namespace: "global",
@@ -2974,6 +2977,9 @@ func heimdallBuildWorkflowInputs(
 	inputs["commit_message"] = firstNonEmpty(anyString(action["reason"]), source)
 	inputs["source_run_url"] = ""
 	inputs["source_run_id"] = "heimdall-guardian-loop"
+	if bundleInputs := heimdallEscalationBundleInputs(context.Background(), nil, action); len(bundleInputs) > 0 {
+		inputs = mergeStringAnyMaps(inputs, bundleInputs)
+	}
 
 	return inputs
 }
@@ -3065,7 +3071,7 @@ func heimdallEscalationBundleContext(ctx context.Context, db *sql.DB, action map
 	namespace := firstNonEmpty(anyString(ref["namespace"]), "global")
 	name := anyString(ref["name"])
 
-	if name != "" {
+	if db != nil && name != "" {
 		if manifestRecord, err := repository.ResolveManifest(ctx, db, "remediation_bundle", namespace, name, nil, true); err == nil {
 			if spec, err := manifestengine.ParseRemediationBundleSpec(manifestRecord.Spec); err == nil {
 				spec = manifestengine.NormalizeRemediationBundleSpec(spec)

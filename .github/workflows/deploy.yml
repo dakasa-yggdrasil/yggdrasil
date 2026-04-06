@@ -73,6 +73,76 @@ on:
         required: false
         default: ""
         type: string
+      remediation_bundle_name:
+        description: Optional remediation bundle name.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_namespace:
+        description: Optional remediation bundle namespace.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_kind:
+        description: Optional remediation bundle kind.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_status:
+        description: Optional remediation bundle status.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_summary:
+        description: Optional remediation bundle summary.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_context:
+        description: Optional serialized remediation bundle context.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_creation_reason_summary:
+        description: Optional remediation bundle creation reason summary.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_creation_reason_comment:
+        description: Optional remediation bundle creation reason comment.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_approval_status:
+        description: Optional remediation bundle approval status.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_approval_summary:
+        description: Optional remediation bundle approval summary.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_approval_comment:
+        description: Optional remediation bundle approval comment.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_promotion_status:
+        description: Optional remediation bundle promotion status.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_promotion_summary:
+        description: Optional remediation bundle promotion summary.
+        required: false
+        default: ""
+        type: string
+      remediation_bundle_promotion_comment:
+        description: Optional remediation bundle promotion comment.
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -117,6 +187,30 @@ jobs:
           - Type: \`${{ inputs.remediation_type }}\`
           - Reason: \`${{ inputs.remediation_reason || 'n/a' }}\`
           EOF
+          fi
+
+          if [ -n "${{ inputs.remediation_bundle_name }}" ]; then
+            cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+
+          ## Remediation bundle context
+
+          - Bundle: \`${{ inputs.remediation_bundle_namespace || 'global' }}/${{ inputs.remediation_bundle_name }}\`
+          - Kind: \`${{ inputs.remediation_bundle_kind || 'n/a' }}\`
+          - Status: \`${{ inputs.remediation_bundle_status || 'n/a' }}\`
+          - Summary: ${{ inputs.remediation_bundle_summary || 'n/a' }}
+          EOF
+
+            if [ -n "${{ inputs.remediation_bundle_creation_reason_summary }}" ] || [ -n "${{ inputs.remediation_bundle_creation_reason_comment }}" ]; then
+              echo "- Creation reason: ${{ inputs.remediation_bundle_creation_reason_summary || 'n/a' }}${{ inputs.remediation_bundle_creation_reason_comment && format(' · {0}', inputs.remediation_bundle_creation_reason_comment) || '' }}" >> "$GITHUB_STEP_SUMMARY"
+            fi
+
+            if [ -n "${{ inputs.remediation_bundle_approval_status }}" ] || [ -n "${{ inputs.remediation_bundle_approval_summary }}" ]; then
+              echo "- Approval decision: ${{ inputs.remediation_bundle_approval_status || 'n/a' }}${{ inputs.remediation_bundle_approval_summary && format(' · {0}', inputs.remediation_bundle_approval_summary) || '' }}${{ inputs.remediation_bundle_approval_comment && format(' · {0}', inputs.remediation_bundle_approval_comment) || '' }}" >> "$GITHUB_STEP_SUMMARY"
+            fi
+
+            if [ -n "${{ inputs.remediation_bundle_promotion_status }}" ] || [ -n "${{ inputs.remediation_bundle_promotion_summary }}" ]; then
+              echo "- Promotion review: ${{ inputs.remediation_bundle_promotion_status || 'n/a' }}${{ inputs.remediation_bundle_promotion_summary && format(' · {0}', inputs.remediation_bundle_promotion_summary) || '' }}${{ inputs.remediation_bundle_promotion_comment && format(' · {0}', inputs.remediation_bundle_promotion_comment) || '' }}" >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
 
       - name: Verify toolchain
