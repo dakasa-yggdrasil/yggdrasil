@@ -170,6 +170,8 @@ func normalizeIntegrationGuardianSignals(signals model.IntegrationGuardianSignal
 	signals.Utilization = normalizeGuardianSignalKeys(signals.Utilization)
 	signals.IdleHours = normalizeGuardianSignalKeys(signals.IdleHours)
 	signals.Overprovisioned = normalizeGuardianSignalKeys(signals.Overprovisioned)
+	signals.SchedulingFailure = normalizeGuardianSignalKeys(signals.SchedulingFailure)
+	signals.InsufficientCPU = normalizeGuardianSignalKeys(signals.InsufficientCPU)
 	return signals
 }
 
@@ -228,6 +230,8 @@ func integrationGuardianSignalGroups(signals model.IntegrationGuardianSignalSupp
 	add("utilization", signals.Utilization)
 	add("idle_hours", signals.IdleHours)
 	add("overprovisioned", signals.Overprovisioned)
+	add("scheduling_failure", signals.SchedulingFailure)
+	add("insufficient_cpu", signals.InsufficientCPU)
 	return groups
 }
 

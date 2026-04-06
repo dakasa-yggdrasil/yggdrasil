@@ -766,6 +766,8 @@ func heimdallApplyIntegrationGuardianSignals(
 	setNumeric("utilization", support.Signals.Utilization, "utilization", "cpu_utilization", "avg_utilization")
 	setNumeric("idle_hours", support.Signals.IdleHours, "idle_hours", "last_active_hours_ago")
 	setBool("overprovisioned", support.Signals.Overprovisioned, "overprovisioned")
+	setBool("scheduling_failure", support.Signals.SchedulingFailure, "scheduling_failure", "failed_scheduling", "unschedulable")
+	setBool("insufficient_cpu", support.Signals.InsufficientCPU, "insufficient_cpu", "cpu_pressure", "cpu_exhausted")
 
 	if len(supportedSignals) > 0 {
 		item["guardian_supported_signals"] = supportedSignals
@@ -811,6 +813,12 @@ func heimdallGuardianBoolSignal(
 		return true, true
 	case containsAnyString(message, "memory pressure") && containsKey(keys, "memory_pressure"):
 		return true, true
+	case containsAnyString(message, "failedscheduling", "failed scheduling", "cannot schedule", "unschedulable", "pending") &&
+		containsKey(keys, "scheduling_failure", "failed_scheduling", "unschedulable"):
+		return true, true
+	case containsAnyString(message, "insufficient cpu", "not enough cpu", "cpu pressure", "cpu exhausted") &&
+		containsKey(keys, "insufficient_cpu", "cpu_pressure", "cpu_exhausted"):
+		return true, true
 	default:
 		return false, false
 	}
@@ -852,6 +860,21 @@ func heimdallIntegrationIncidents(health model.IntegrationInstanceHealth, item m
 			"category":            category,
 			"title":               fmt.Sprintf("Integration %s is %s", health.IntegrationInstance.Name, status),
 			"message":             health.RuntimeState.Message,
+			"component_kind":      "integration",
+			"component_name":      health.IntegrationInstance.Name,
+			"component_namespace": health.IntegrationInstance.Namespace,
+			"repository":          anyString(item["repository"]),
+			"evidence":            cloneAuthorizationInput(evidence),
+		})
+	}
+
+	if firstBool(item, []string{"scheduling_failure", "insufficient_cpu"}, false) {
+		incidents = append(incidents, map[string]any{
+			"severity":            "critical",
+			"status":              "open",
+			"category":            "capacity_scheduling_failure",
+			"title":               fmt.Sprintf("Integration %s cannot schedule workloads due to CPU pressure", health.IntegrationInstance.Name),
+			"message":             firstNonEmpty(health.RuntimeState.Message, "The provider reported scheduling failure caused by insufficient CPU capacity."),
 			"component_kind":      "integration",
 			"component_name":      health.IntegrationInstance.Name,
 			"component_namespace": health.IntegrationInstance.Namespace,

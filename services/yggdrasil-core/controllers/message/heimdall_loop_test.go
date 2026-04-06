@@ -47,6 +47,74 @@ func TestHeimdallIntegrationIncidentsAddsOOMCapacityIncident(t *testing.T) {
 	}
 }
 
+func TestHeimdallApplyIntegrationGuardianSignalsMapsSchedulingFailures(t *testing.T) {
+	item := heimdallApplyIntegrationGuardianSignals(
+		map[string]any{},
+		&model.IntegrationRuntimeState{
+			Message: "0/3 nodes are available: 3 Insufficient cpu. FailedScheduling",
+			Details: map[string]any{
+				"failed_scheduling": true,
+				"insufficient_cpu":  true,
+			},
+		},
+		model.IntegrationGuardianSupportSpec{
+			Mode: "light",
+			Signals: model.IntegrationGuardianSignalSupportSpec{
+				SchedulingFailure: []string{"failed_scheduling"},
+				InsufficientCPU:   []string{"insufficient_cpu"},
+			},
+		},
+	)
+
+	if got, ok := item["scheduling_failure"].(bool); !ok || !got {
+		t.Fatalf("scheduling_failure = %#v, want true", item["scheduling_failure"])
+	}
+	if got, ok := item["insufficient_cpu"].(bool); !ok || !got {
+		t.Fatalf("insufficient_cpu = %#v, want true", item["insufficient_cpu"])
+	}
+}
+
+func TestHeimdallIntegrationIncidentsAddsSchedulingFailureIncidentForInsufficientCPU(t *testing.T) {
+	health := model.IntegrationInstanceHealth{
+		IntegrationInstance: model.ManifestReference{
+			Namespace: "global",
+			Name:      "integration-kubernetes-prod",
+		},
+		IntegrationType: model.ManifestReference{
+			Namespace: "global",
+			Name:      "kubernetes",
+		},
+		RuntimeState: &model.IntegrationRuntimeState{
+			Status:  "degraded",
+			Message: "0/3 nodes are available: 3 Insufficient cpu. FailedScheduling",
+			Details: map[string]any{
+				"failed_scheduling": true,
+				"insufficient_cpu":  true,
+			},
+		},
+	}
+
+	incidents := heimdallIntegrationIncidents(health, map[string]any{
+		"repository":            "dakasa-yggdrasil/integration-kubernetes",
+		"guardian_support_mode": "light",
+		"scheduling_failure":    true,
+		"insufficient_cpu":      true,
+	})
+
+	foundSchedulingFailure := false
+	for _, incident := range incidents {
+		if strings.EqualFold(anyString(incident["category"]), "capacity_scheduling_failure") {
+			foundSchedulingFailure = true
+			if got := anyString(incident["repository"]); got != "dakasa-yggdrasil/integration-kubernetes" {
+				t.Fatalf("repository = %q, want dakasa-yggdrasil/integration-kubernetes", got)
+			}
+		}
+	}
+	if !foundSchedulingFailure {
+		t.Fatalf("expected capacity_scheduling_failure incident, got %#v", incidents)
+	}
+}
+
 func TestHeimdallIntegrationIncidentsEnrichEvidenceWithProviderContext(t *testing.T) {
 	health := model.IntegrationInstanceHealth{
 		IntegrationInstance: model.ManifestReference{

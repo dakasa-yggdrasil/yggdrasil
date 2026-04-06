@@ -72,26 +72,28 @@ type IntegrationCredentialPolicySpec struct {
 // lightweight operational signals to Heimdall without needing a custom plugin
 // path per provider.
 type IntegrationGuardianSupportSpec struct {
-	Mode    string                                `json:"mode,omitempty"`
-	Signals IntegrationGuardianSignalSupportSpec  `json:"signals,omitempty"`
+	Mode    string                               `json:"mode,omitempty"`
+	Signals IntegrationGuardianSignalSupportSpec `json:"signals,omitempty"`
 }
 
 // IntegrationGuardianSignalSupportSpec maps provider-specific runtime detail
 // keys into the canonical signals Heimdall understands in lightweight mode.
 type IntegrationGuardianSignalSupportSpec struct {
-	OOMKilled      []string `json:"oom_killed,omitempty"`
-	RestartCount   []string `json:"restart_count,omitempty"`
-	ErrorRate      []string `json:"error_rate,omitempty"`
-	QueueBacklog   []string `json:"queue_backlog,omitempty"`
-	MemoryPressure []string `json:"memory_pressure,omitempty"`
-	DiskPressure   []string `json:"disk_pressure,omitempty"`
-	RateLimited    []string `json:"rate_limited,omitempty"`
-	AuthDenied     []string `json:"auth_denied,omitempty"`
-	SyncLagSeconds []string `json:"sync_lag_seconds,omitempty"`
-	MonthlyCostUSD []string `json:"monthly_cost_usd,omitempty"`
-	Utilization    []string `json:"utilization,omitempty"`
-	IdleHours      []string `json:"idle_hours,omitempty"`
-	Overprovisioned []string `json:"overprovisioned,omitempty"`
+	OOMKilled         []string `json:"oom_killed,omitempty"`
+	RestartCount      []string `json:"restart_count,omitempty"`
+	ErrorRate         []string `json:"error_rate,omitempty"`
+	QueueBacklog      []string `json:"queue_backlog,omitempty"`
+	MemoryPressure    []string `json:"memory_pressure,omitempty"`
+	DiskPressure      []string `json:"disk_pressure,omitempty"`
+	RateLimited       []string `json:"rate_limited,omitempty"`
+	AuthDenied        []string `json:"auth_denied,omitempty"`
+	SyncLagSeconds    []string `json:"sync_lag_seconds,omitempty"`
+	MonthlyCostUSD    []string `json:"monthly_cost_usd,omitempty"`
+	Utilization       []string `json:"utilization,omitempty"`
+	IdleHours         []string `json:"idle_hours,omitempty"`
+	Overprovisioned   []string `json:"overprovisioned,omitempty"`
+	SchedulingFailure []string `json:"scheduling_failure,omitempty"`
+	InsufficientCPU   []string `json:"insufficient_cpu,omitempty"`
 }
 
 // IntegrationResourceType defines one external resource category exposed by the adapter.

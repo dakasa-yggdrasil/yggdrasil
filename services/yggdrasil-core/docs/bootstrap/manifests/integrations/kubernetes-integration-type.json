@@ -36,6 +36,8 @@
         "error_rate": ["error_rate", "failure_rate"],
         "memory_pressure": ["memory_pressure"],
         "disk_pressure": ["disk_pressure"],
+        "scheduling_failure": ["scheduling_failure", "failed_scheduling", "unschedulable"],
+        "insufficient_cpu": ["insufficient_cpu", "cpu_pressure", "cpu_exhausted"],
         "utilization": ["utilization", "avg_utilization"],
         "overprovisioned": ["overprovisioned"]
       }
