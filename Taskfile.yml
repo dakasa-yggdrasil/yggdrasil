@@ -96,6 +96,11 @@ tasks:
     cmds:
       - ./scripts/activate-heimdall-llm.sh
 
+  heimdall:verify:llm:
+    desc: Verify that Heimdall LLM fallback is active and backed by managed secrets
+    cmds:
+      - ./scripts/verify-heimdall-llm.sh
+
   install:smoke:
     desc: Validate installation-manager flows against real remote repositories in an isolated workspace
     cmds:

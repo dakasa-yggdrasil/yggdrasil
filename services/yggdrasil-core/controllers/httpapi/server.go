@@ -1246,7 +1246,7 @@ func (s *Server) materializeIntegrationInstanceSecretConfig(
 			return err
 		}
 
-		payload.Config[key] = fmt.Sprintf("secret://%s/%s.value", secret.Namespace, secret.Name)
+		payload.Config[key] = fmt.Sprintf("secret://%s/%s#value", secret.Namespace, secret.Name)
 	}
 
 	return nil

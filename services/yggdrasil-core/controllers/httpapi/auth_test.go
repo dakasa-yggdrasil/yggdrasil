@@ -251,6 +251,136 @@ func TestMaterializeThirdPartyAuthProviderClientSecretHonorsExplicitSecretRef(t 
 	}
 }
 
+func TestMaterializeIntegrationInstanceSecretConfigUsesHashValueRef(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New error: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			INSERT INTO public.managed_secrets (
+				namespace,
+				name,
+				status,
+				data,
+				metadata,
+				rotation,
+				expires_at
+			) VALUES (
+				$1,
+				$2,
+				$3,
+				$4::jsonb,
+				$5::jsonb,
+				$6::jsonb,
+				$7
+			)
+			ON CONFLICT (namespace, name)
+			DO UPDATE SET
+				status = EXCLUDED.status,
+				data = EXCLUDED.data,
+				metadata = EXCLUDED.metadata,
+				rotation = EXCLUDED.rotation,
+				expires_at = EXCLUDED.expires_at,
+				version = CASE
+					WHEN public.managed_secrets.data IS DISTINCT FROM EXCLUDED.data
+						THEN public.managed_secrets.version + 1
+					ELSE public.managed_secrets.version
+				END,
+				last_rotated_at = CASE
+					WHEN public.managed_secrets.data IS DISTINCT FROM EXCLUDED.data
+						THEN NOW()
+					ELSE public.managed_secrets.last_rotated_at
+				END,
+				updated_at = NOW()
+			RETURNING
+				id,
+				namespace,
+				name,
+				status,
+				version,
+				data,
+				metadata,
+				rotation,
+				last_rotated_at,
+				expires_at,
+				created_at,
+				updated_at
+		`)).
+		WithArgs(
+			"global",
+			"heimdall-guardian-config-llm-gpt-api-key",
+			"active",
+			[]byte(`{"value":"top-secret"}`),
+			[]byte(`{"field":"llm_gpt_api_key","integration_instance":{"name":"heimdall-guardian","namespace":"global"},"source_kind":"integration_instance_config"}`),
+			[]byte(`{"mode":"manual"}`),
+			nil,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id",
+			"namespace",
+			"name",
+			"status",
+			"version",
+			"data",
+			"metadata",
+			"rotation",
+			"last_rotated_at",
+			"expires_at",
+			"created_at",
+			"updated_at",
+		}).AddRow(
+			uuid.New(),
+			"global",
+			"heimdall-guardian-config-llm-gpt-api-key",
+			"active",
+			1,
+			[]byte(`{"value":"top-secret"}`),
+			[]byte(`{"field":"llm_gpt_api_key","integration_instance":{"name":"heimdall-guardian","namespace":"global"},"source_kind":"integration_instance_config"}`),
+			[]byte(`{"mode":"manual"}`),
+			now,
+			nil,
+			now,
+			now,
+		))
+
+	server := &Server{db: db}
+	payload := &consoleCreateIntegrationInstanceRequest{
+		Name:      "heimdall-guardian",
+		Namespace: "global",
+		Config: map[string]any{
+			"llm_gpt_api_key": "top-secret",
+		},
+	}
+	typeSpec := model.IntegrationTypeManifestSpec{
+		InstanceSchema: model.IntegrationSchemaSpec{
+			Properties: map[string]model.IntegrationSchemaProperty{
+				"llm_gpt_api_key": {
+					Type:   "string",
+					Secret: true,
+				},
+			},
+		},
+	}
+
+	if err := server.materializeIntegrationInstanceSecretConfig(context.Background(), payload, typeSpec); err != nil {
+		t.Fatalf("materializeIntegrationInstanceSecretConfig error: %v", err)
+	}
+
+	expectedRef := "secret://global/heimdall-guardian-config-llm-gpt-api-key#value"
+	if got := payload.Config["llm_gpt_api_key"]; got != expectedRef {
+		t.Fatalf("config ref = %#v, want %q", got, expectedRef)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestAuthSurfaceBaseURLPrefersExplicitSurfaceHeader(t *testing.T) {
 	t.Parallel()
 

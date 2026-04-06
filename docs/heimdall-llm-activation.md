@@ -43,6 +43,7 @@ discipline.
 export HEIMDALL_GPT_API_KEY="..."
 export HEIMDALL_CLAUDE_API_KEY="..."
 task heimdall:activate:llm
+task heimdall:verify:llm
 ```
 
 Or directly:
@@ -53,6 +54,12 @@ HEIMDALL_CLAUDE_API_KEY="..." \
 ./scripts/activate-heimdall-llm.sh
 ```
 
+Verification:
+
+```bash
+./scripts/verify-heimdall-llm.sh
+```
+
 ## Result
 
 After activation, the script verifies that:
@@ -61,6 +68,13 @@ After activation, the script verifies that:
 - `llm_provider_order` is set
 - `llm_gpt_api_key` is persisted as a `secret://...` ref
 - `llm_claude_api_key` is persisted as a `secret://...` ref
+
+The verification task then confirms that:
+
+- the active `integration_instance` still has `llm_enabled=true`
+- both provider refs are present
+- both managed secrets exist
+- both secrets expose the expected `value` key
 
 The managed secret names created by the core follow the standard
 `<instance>-config-<field>` shape, so for the default instance you should see:

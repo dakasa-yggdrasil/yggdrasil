@@ -151,6 +151,7 @@ Rode o smoke end-to-end do produto:
 task smoke
 task heimdall:smoke
 task heimdall:activate:llm
+task heimdall:verify:llm
 task install:smoke
 ```
 
