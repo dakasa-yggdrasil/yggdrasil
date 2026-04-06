@@ -1987,6 +1987,7 @@ func heimdallRemediationBundleSpecFromAction(
 		ExpiresAt:          expiresAt.Format(time.RFC3339),
 		TriggerAction:      cloneAuthorizationInput(action),
 		Incident:           heimdallIncidentFromAction(action),
+		CreationReason:     heimdallRemediationBundleCreationReason(action, bundle, policy, source, steps, now),
 		Steps:              steps,
 		Metadata: map[string]any{
 			"ttl_seconds":       ttlSeconds,
@@ -2286,6 +2287,17 @@ func updateHeimdallApprovalLinkedBundle(
 	spec.Metadata["approval_name"] = approvalManifest.Metadata.Name
 	spec.Metadata["approval_namespace"] = approvalManifest.Metadata.Namespace
 	spec.Metadata["approval_status"] = model.GuardianApprovalStatusPending
+	spec.ApprovalDecision = &model.RemediationBundleReasonSpec{
+		Kind:       "approval_pending",
+		Status:     model.GuardianApprovalStatusPending,
+		Summary:    "Waiting for a human to approve the generated remediation bundle.",
+		Source:     "guardian_approval",
+		RecordedAt: time.Now().UTC().Format(time.RFC3339),
+		Metadata: map[string]any{
+			"approval_name":      approvalManifest.Metadata.Name,
+			"approval_namespace": approvalManifest.Metadata.Namespace,
+		},
+	}
 	_, err = updateHeimdallRemediationBundleStatus(ctx, db, heimdallRemediationBundle{
 		Manifest: manifestRecord,
 		Spec:     spec,
@@ -2324,6 +2336,7 @@ func UpdateHeimdallApprovalBundleStatus(
 		spec.Metadata = map[string]any{}
 	}
 	spec.Metadata["approval_status"] = strings.TrimSpace(status)
+	spec.ApprovalDecision = heimdallRemediationBundleApprovalReason(approval, status)
 	_, err = updateHeimdallRemediationBundleStatus(ctx, db, heimdallRemediationBundle{
 		Manifest: manifestRecord,
 		Spec:     spec,
@@ -2340,6 +2353,69 @@ func heimdallRemediationBundleRef(manifestRecord model.Manifest, spec model.Reme
 		"bundle_kind":      spec.BundleKind,
 		"expires_at":       spec.ExpiresAt,
 		"promotion_target": anyString(spec.Metadata["promotion_target"]),
+	}
+}
+
+func heimdallRemediationBundleCreationReason(
+	action map[string]any,
+	bundle map[string]any,
+	policy model.GuardianPolicyManifestSpec,
+	source string,
+	steps []model.RemediationBundleStepSpec,
+	now time.Time,
+) *model.RemediationBundleReasonSpec {
+	reason := firstNonEmptyMap(bundle["reason"], action["bundle_reason"])
+	metadata := map[string]any{
+		"bundle_kind":         normalizeState(firstNonEmpty(anyString(bundle["kind"]), anyString(bundle["bundle_kind"]))),
+		"step_count":          len(steps),
+		"approval_required":   policy.GeneratedBundles.RequireApproval,
+		"incident_category":   firstNonEmpty(anyString(asObject(action["target"])["guardian_memory_incident_category"]), anyString(asObject(action["incident"])["category"])),
+		"provider_group":      firstNonEmpty(anyString(asObject(action["target"])["guardian_memory_provider_group"]), anyString(asObject(action["target"])["provider_group"])),
+		"component_kind":      firstNonEmpty(anyString(action["component_kind"]), anyString(action["kind"]), "component"),
+		"component_namespace": firstNonEmpty(anyString(action["component_namespace"]), anyString(action["namespace"]), "global"),
+		"component_name":      firstNonEmpty(anyString(action["component_name"]), anyString(action["name"]), "unknown"),
+	}
+	for key, value := range asObject(reason["metadata"]) {
+		metadata[key] = value
+	}
+	summary := firstNonEmpty(
+		anyString(reason["summary"]),
+		anyString(reason["message"]),
+		anyString(bundle["summary"]),
+		"Generated a temporary remediation bundle because the existing bounded execute path was insufficient.",
+	)
+	return &model.RemediationBundleReasonSpec{
+		Kind:       firstNonEmpty(normalizeState(anyString(reason["kind"])), "generated_hotfix_bundle"),
+		Summary:    summary,
+		Comment:    firstNonEmpty(anyString(reason["comment"]), anyString(action["reason"])),
+		Source:     firstNonEmpty(normalizeState(anyString(reason["source"])), normalizeState(anyString(action["proposed_by"])), source, "heimdall"),
+		Actor:      firstNonEmpty(anyString(reason["actor"]), "heimdall"),
+		RecordedAt: now.UTC().Format(time.RFC3339),
+		Metadata:   metadata,
+	}
+}
+
+func heimdallRemediationBundleApprovalReason(
+	approval model.GuardianApprovalManifestSpec,
+	status string,
+) *model.RemediationBundleReasonSpec {
+	summary := "Generated remediation bundle approved for execution."
+	if strings.TrimSpace(status) == model.GuardianApprovalStatusRejected {
+		summary = "Generated remediation bundle rejected and left unexecuted."
+	}
+	metadata := map[string]any{
+		"approval_name":      firstNonEmpty(anyString(approval.Metadata["bundle_name"]), ""),
+		"approval_namespace": firstNonEmpty(anyString(approval.Metadata["bundle_namespace"]), "global"),
+	}
+	return &model.RemediationBundleReasonSpec{
+		Kind:       "approval_decision",
+		Status:     strings.TrimSpace(status),
+		Summary:    summary,
+		Comment:    strings.TrimSpace(anyString(approval.Metadata["decision_comment"])),
+		Source:     "guardian_approval",
+		Actor:      firstNonEmpty(anyString(approval.Metadata["decision_actor"]), "console"),
+		RecordedAt: firstNonEmpty(anyString(approval.Metadata["decided_at"]), time.Now().UTC().Format(time.RFC3339)),
+		Metadata:   metadata,
 	}
 }
 

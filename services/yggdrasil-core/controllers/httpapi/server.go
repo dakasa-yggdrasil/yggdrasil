@@ -729,6 +729,7 @@ func (s *Server) handleGuardianMemoryReview(w http.ResponseWriter, r *http.Reque
 	}
 
 	updated := make([]model.Manifest, 0)
+	reviewedSpecs := make([]model.GuardianMemoryManifestSpec, 0)
 	for _, manifestRecord := range manifests {
 		spec, err := manifestengine.ParseGuardianMemorySpec(manifestRecord.Spec)
 		if err != nil {
@@ -758,10 +759,16 @@ func (s *Server) handleGuardianMemoryReview(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		updated = append(updated, updatedManifest)
+		reviewedSpecs = append(reviewedSpecs, spec)
 	}
 
 	if len(updated) == 0 {
 		writeMappedError(w, repository.ErrManifestNotFound)
+		return
+	}
+
+	if err := propagateGuardianMemoryReviewToBundles(r.Context(), s.db, reviewedSpecs, reviewStatus, req.Comment, req); err != nil {
+		writeMappedError(w, err)
 		return
 	}
 
@@ -932,16 +939,138 @@ func applyGuardianMemoryReview(metadata map[string]any, reviewStatus, comment st
 		delete(updated, "learned_playbook_review_status")
 		delete(updated, "learned_playbook_reviewed_at")
 		delete(updated, "learned_playbook_review_note")
+		delete(updated, "learned_playbook_review")
 	default:
 		updated["learned_playbook_review_status"] = reviewStatus
-		updated["learned_playbook_reviewed_at"] = time.Now().UTC().Format(time.RFC3339)
+		recordedAt := time.Now().UTC().Format(time.RFC3339)
+		updated["learned_playbook_reviewed_at"] = recordedAt
 		if strings.TrimSpace(comment) != "" {
 			updated["learned_playbook_review_note"] = strings.TrimSpace(comment)
 		} else {
 			delete(updated, "learned_playbook_review_note")
 		}
+		updated["learned_playbook_review"] = map[string]any{
+			"kind":        "learned_playbook_review",
+			"status":      reviewStatus,
+			"summary":     guardianMemoryReviewSummary(reviewStatus),
+			"comment":     strings.TrimSpace(comment),
+			"source":      "console_review",
+			"actor":       "console",
+			"recorded_at": recordedAt,
+		}
 	}
 	return updated
+}
+
+func guardianMemoryReviewSummary(reviewStatus string) string {
+	switch reviewStatus {
+	case "promoted":
+		return "Learned playbook manually promoted for lightweight reuse."
+	case "blocked":
+		return "Learned playbook blocked from future lightweight reuse."
+	default:
+		return "Learned playbook review updated."
+	}
+}
+
+func propagateGuardianMemoryReviewToBundles(
+	ctx context.Context,
+	db *sql.DB,
+	specs []model.GuardianMemoryManifestSpec,
+	reviewStatus string,
+	comment string,
+	req guardianMemoryReviewRequest,
+) error {
+	if len(specs) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, spec := range specs {
+		ref := remediationBundleRefFromGuardianMemory(spec)
+		if ref.namespace == "" || ref.name == "" {
+			continue
+		}
+		key := ref.namespace + "/" + ref.name
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		if err := updateRemediationBundlePromotionReview(ctx, db, ref.namespace, ref.name, reviewStatus, comment, req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type remediationBundleRef struct {
+	namespace string
+	name      string
+}
+
+func remediationBundleRefFromGuardianMemory(spec model.GuardianMemoryManifestSpec) remediationBundleRef {
+	actionTarget, ok := spec.Action["target"].(map[string]any)
+	if !ok {
+		return remediationBundleRef{}
+	}
+	bundleRef, ok := actionTarget["remediation_bundle"].(map[string]any)
+	if !ok {
+		return remediationBundleRef{}
+	}
+	return remediationBundleRef{
+		namespace: firstNonEmpty(anyString(bundleRef["namespace"]), "global"),
+		name:      anyString(bundleRef["name"]),
+	}
+}
+
+func updateRemediationBundlePromotionReview(
+	ctx context.Context,
+	db *sql.DB,
+	namespace string,
+	name string,
+	reviewStatus string,
+	comment string,
+	req guardianMemoryReviewRequest,
+) error {
+	manifestRecord, err := repository.ResolveManifest(ctx, db, "remediation_bundle", namespace, name, nil, true)
+	if err != nil {
+		return err
+	}
+	spec, err := manifestengine.ParseRemediationBundleSpec(manifestRecord.Spec)
+	if err != nil {
+		return err
+	}
+	spec = manifestengine.NormalizeRemediationBundleSpec(spec)
+	if reviewStatus == "clear" {
+		spec.PromotionReview = nil
+	} else {
+		spec.PromotionReview = &model.RemediationBundleReasonSpec{
+			Kind:       "learned_playbook_review",
+			Status:     reviewStatus,
+			Summary:    guardianMemoryReviewSummary(reviewStatus),
+			Comment:    strings.TrimSpace(comment),
+			Source:     "console_review",
+			Actor:      "console",
+			RecordedAt: time.Now().UTC().Format(time.RFC3339),
+			Metadata: map[string]any{
+				"action_type":       strings.TrimSpace(req.ActionType),
+				"pattern_kind":      strings.TrimSpace(req.PatternKind),
+				"pattern_value":     strings.TrimSpace(req.PatternValue),
+				"incident_category": strings.TrimSpace(req.IncidentCategory),
+				"provider_group":    strings.TrimSpace(req.ProviderGroup),
+			},
+		}
+	}
+	specRaw, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("marshal remediation bundle review spec: %w", err)
+	}
+	_, err = createManifestVersion(ctx, db, model.ManifestDocument{
+		APIVersion: manifestRecord.APIVersion,
+		Kind:       manifestRecord.Kind,
+		Metadata:   manifestMetadataInputFromManifest(manifestRecord),
+		Spec:       specRaw,
+	})
+	return err
 }
 
 func guardianMemoryMatchesPlaybookReview(

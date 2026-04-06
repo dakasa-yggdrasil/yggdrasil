@@ -24,6 +24,17 @@ type RemediationBundleExecutionSpec struct {
 	ExecutedSteps []string `json:"executed_steps,omitempty"`
 }
 
+type RemediationBundleReasonSpec struct {
+	Kind       string         `json:"kind,omitempty"`
+	Status     string         `json:"status,omitempty"`
+	Summary    string         `json:"summary,omitempty"`
+	Comment    string         `json:"comment,omitempty"`
+	Source     string         `json:"source,omitempty"`
+	Actor      string         `json:"actor,omitempty"`
+	RecordedAt string         `json:"recorded_at,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
 type RemediationBundleStepSpec struct {
 	Name               string                             `json:"name"`
 	Mode               string                             `json:"mode"`
@@ -48,6 +59,9 @@ type RemediationBundleManifestSpec struct {
 	ExpiresAt          string                         `json:"expires_at"`
 	TriggerAction      map[string]any                 `json:"trigger_action,omitempty"`
 	Incident           map[string]any                 `json:"incident,omitempty"`
+	CreationReason     *RemediationBundleReasonSpec   `json:"creation_reason,omitempty"`
+	ApprovalDecision   *RemediationBundleReasonSpec   `json:"approval_decision,omitempty"`
+	PromotionReview    *RemediationBundleReasonSpec   `json:"promotion_review,omitempty"`
 	Steps              []RemediationBundleStepSpec    `json:"steps"`
 	Execution          RemediationBundleExecutionSpec `json:"execution,omitempty"`
 	Metadata           map[string]any                 `json:"metadata,omitempty"`

@@ -65,6 +65,16 @@ func TestApplyGuardianMemoryReview(t *testing.T) {
 	if promoted["learned_playbook_reviewed_at"] == nil {
 		t.Fatal("expected reviewed_at to be populated")
 	}
+	structured, ok := promoted["learned_playbook_review"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured review record, got %#v", promoted["learned_playbook_review"])
+	}
+	if got := structured["status"]; got != "promoted" {
+		t.Fatalf("structured review status = %#v, want promoted", got)
+	}
+	if got := structured["comment"]; got != "human-reviewed" {
+		t.Fatalf("structured review comment = %#v, want human-reviewed", got)
+	}
 
 	cleared := applyGuardianMemoryReview(promoted, "clear", "")
 	if _, ok := cleared["learned_playbook_review_status"]; ok {
@@ -75,5 +85,8 @@ func TestApplyGuardianMemoryReview(t *testing.T) {
 	}
 	if _, ok := cleared["learned_playbook_reviewed_at"]; ok {
 		t.Fatal("expected reviewed_at to be cleared")
+	}
+	if _, ok := cleared["learned_playbook_review"]; ok {
+		t.Fatal("expected structured review record to be cleared")
 	}
 }

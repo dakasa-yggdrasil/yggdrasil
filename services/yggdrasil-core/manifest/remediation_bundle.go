@@ -74,6 +74,15 @@ func ValidateRemediationBundleSpec(spec model.RemediationBundleManifestSpec) err
 	if err := validateLooseObject("remediation_bundle metadata", spec.Metadata); err != nil {
 		return err
 	}
+	for _, reason := range []*model.RemediationBundleReasonSpec{
+		spec.CreationReason,
+		spec.ApprovalDecision,
+		spec.PromotionReview,
+	} {
+		if err := validateRemediationBundleReason(reason); err != nil {
+			return err
+		}
+	}
 	for _, value := range []string{
 		spec.Execution.AttemptedAt,
 		spec.Execution.CompletedAt,
@@ -166,6 +175,9 @@ func NormalizeRemediationBundleSpec(spec model.RemediationBundleManifestSpec) mo
 	if spec.Incident == nil {
 		spec.Incident = map[string]any{}
 	}
+	spec.CreationReason = normalizeRemediationBundleReason(spec.CreationReason)
+	spec.ApprovalDecision = normalizeRemediationBundleReason(spec.ApprovalDecision)
+	spec.PromotionReview = normalizeRemediationBundleReason(spec.PromotionReview)
 	if spec.Metadata == nil {
 		spec.Metadata = map[string]any{}
 	}
@@ -214,4 +226,37 @@ func NormalizeRemediationBundleSpec(spec model.RemediationBundleManifestSpec) mo
 	spec.Steps = steps
 
 	return spec
+}
+
+func validateRemediationBundleReason(reason *model.RemediationBundleReasonSpec) error {
+	if reason == nil {
+		return nil
+	}
+	if err := validateLooseObject("remediation_bundle reason metadata", reason.Metadata); err != nil {
+		return err
+	}
+	if strings.TrimSpace(reason.RecordedAt) != "" {
+		if _, err := time.Parse(time.RFC3339, reason.RecordedAt); err != nil {
+			return fmt.Errorf("remediation_bundle reason recorded_at must use RFC3339: %w", err)
+		}
+	}
+	return nil
+}
+
+func normalizeRemediationBundleReason(reason *model.RemediationBundleReasonSpec) *model.RemediationBundleReasonSpec {
+	if reason == nil {
+		return nil
+	}
+	normalized := *reason
+	normalized.Kind = strings.ToLower(strings.TrimSpace(normalized.Kind))
+	normalized.Status = strings.ToLower(strings.TrimSpace(normalized.Status))
+	normalized.Summary = strings.TrimSpace(normalized.Summary)
+	normalized.Comment = strings.TrimSpace(normalized.Comment)
+	normalized.Source = strings.ToLower(strings.TrimSpace(normalized.Source))
+	normalized.Actor = strings.TrimSpace(normalized.Actor)
+	normalized.RecordedAt = strings.TrimSpace(normalized.RecordedAt)
+	if normalized.Metadata == nil {
+		normalized.Metadata = map[string]any{}
+	}
+	return &normalized
 }
