@@ -1731,6 +1731,9 @@ func executeHeimdallWorkflowDispatch(
 	ref := firstNonEmpty(heimdallWorkflowRefFromAction(action), binding.Spec.DefaultBranch, defaultHeimdallDispatchBranch)
 	repositoryName := firstNonEmpty(anyString(action["repository"]), binding.Spec.Repository)
 	inputs := heimdallBuildWorkflowInputs(action, binding.Spec, source, nil)
+	if bundleInputs := heimdallEscalationBundleInputs(ctx, db, action); len(bundleInputs) > 0 {
+		inputs = mergeStringAnyMaps(inputs, bundleInputs)
+	}
 
 	if !options.SkipCooldown && !heimdallActionCooldownAllowed(action, binding.Spec, policy) {
 		return fmt.Errorf("heimdall action for %s is still in cooldown", binding.Spec.Repository)
@@ -2522,6 +2525,9 @@ func executeHeimdallContractWorkflowDispatch(
 	workflow := firstNonEmpty(contractAction.WorkflowDispatch.Workflow, binding.Spec.DeployWorkflow, defaultHeimdallDispatchWorkflow)
 	ref := firstNonEmpty(contractAction.WorkflowDispatch.Ref, binding.Spec.DefaultBranch, defaultHeimdallDispatchBranch)
 	inputs := heimdallBuildWorkflowInputs(action, binding.Spec, source, contractAction.WorkflowDispatch.Inputs)
+	if bundleInputs := heimdallEscalationBundleInputs(ctx, db, action); len(bundleInputs) > 0 {
+		inputs = mergeStringAnyMaps(inputs, bundleInputs)
+	}
 	inputs["remediation_type"] = strings.ToLower(strings.TrimSpace(contractAction.Name))
 	inputs["remediation_reason"] = firstNonEmpty(anyString(action["reason"]), anyString(action["description"]), source)
 	inputs["remediation_payload"] = heimdallActionPayload(action)
@@ -2977,9 +2983,6 @@ func heimdallBuildWorkflowInputs(
 	inputs["commit_message"] = firstNonEmpty(anyString(action["reason"]), source)
 	inputs["source_run_url"] = ""
 	inputs["source_run_id"] = "heimdall-guardian-loop"
-	if bundleInputs := heimdallEscalationBundleInputs(context.Background(), nil, action); len(bundleInputs) > 0 {
-		inputs = mergeStringAnyMaps(inputs, bundleInputs)
-	}
 
 	return inputs
 }
