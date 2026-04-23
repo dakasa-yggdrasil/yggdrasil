@@ -30,6 +30,42 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "init":
+		if err := runInit(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+	case "login":
+		if err := runLogin(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+	case "apply":
+		if err := runApply(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+	case "get":
+		if err := runGet(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+	case "describe":
+		if err := runDescribe(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+	case "logs":
+		if err := runLogs(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+	case "status":
+		if err := runStatus(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+	case "version", "--version":
+		if err := runVersion(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+	case "auth":
+		if err := runAuth(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
 	case "integrations":
 		if err := runIntegrations(manager, os.Args[2:]); err != nil {
 			exitErr(err)
@@ -220,25 +256,33 @@ func findRoot() (string, error) {
 }
 
 func printUsage() {
-	fmt.Println(`yggdrasil - Yggdrasil platform CLI
+	fmt.Println(`yggdrasil — self-hosted control plane CLI
 
-Usage:
-  yggdrasil install <repo_ref>                       quickstart-install an integration on a remote yggdrasil-core
-  yggdrasil integrations list
-  yggdrasil integrations install <slug>              clone an integration into the local workspace (dev mode)
-  yggdrasil integrations remove <slug>
-  yggdrasil integrations tui
-  yggdrasil integrations installed
-  yggdrasil surfaces list
-  yggdrasil surfaces active
-  yggdrasil surfaces install <name>
-  yggdrasil surfaces remove <name>
-  yggdrasil surfaces installed
-  yggdrasil surfaces scaffold <name> [module]
-  yggdrasil surfaces activate <name>
-  yggdrasil surfaces deactivate <name>
+Bootstrap & connection:
+  yggdrasil init [--dir <path>]                      one-command standalone bootstrap (Postgres + RMQ + core)
+  yggdrasil init --server <url>                      attach to an existing yggdrasil-core
+  yggdrasil login --server <url> --username <slug>   exchange credentials for a session token
+  yggdrasil status                                   show active context + health
+  yggdrasil version                                  print CLI version
 
-Run 'yggdrasil install --help' for the quickstart flow's flags.`)
+Manifest operations (require an active context):
+  yggdrasil apply -f <file>                          create a new manifest version from YAML/JSON
+  yggdrasil get <kind> [<name>]                      list or fetch manifests
+  yggdrasil describe <kind> <name>                   print one manifest as YAML
+  yggdrasil logs <run-id>                            stream a workflow run
+
+Auth & providers:
+  yggdrasil auth provider list                       list configured OAuth/OIDC providers
+  yggdrasil auth provider apply -f <file>            register or update a provider
+
+Integration catalog:
+  yggdrasil install <repo_ref>                       quickstart-install an integration
+
+Workspace dev (for contributors):
+  yggdrasil integrations <subcommand>
+  yggdrasil surfaces <subcommand>
+
+Run 'yggdrasil <command> --help' for command-specific flags.`)
 }
 
 func printIntegrationsUsage() {
