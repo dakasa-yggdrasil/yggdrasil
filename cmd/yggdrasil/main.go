@@ -38,6 +38,10 @@ func main() {
 		if err := runSurfaces(surfaceManager, os.Args[2:]); err != nil {
 			exitErr(err)
 		}
+	case "install":
+		if err := runInstall(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -70,7 +74,7 @@ func runSurfaces(manager *surfaces.Manager, args []string) error {
 		return nil
 	case "install":
 		if len(args) < 2 {
-			return errors.New("usage: ygg surfaces install <name>")
+			return errors.New("usage: yggdrasil surfaces install <name>")
 		}
 		entry, source, err := manager.Install(args[1])
 		if err != nil {
@@ -80,7 +84,7 @@ func runSurfaces(manager *surfaces.Manager, args []string) error {
 		return nil
 	case "remove":
 		if len(args) < 2 {
-			return errors.New("usage: ygg surfaces remove <name>")
+			return errors.New("usage: yggdrasil surfaces remove <name>")
 		}
 		entry, err := manager.Remove(args[1])
 		if err != nil {
@@ -99,7 +103,7 @@ func runSurfaces(manager *surfaces.Manager, args []string) error {
 		return nil
 	case "scaffold":
 		if len(args) < 2 {
-			return errors.New("usage: ygg surfaces scaffold <name> [module]")
+			return errors.New("usage: yggdrasil surfaces scaffold <name> [module]")
 		}
 		module := ""
 		if len(args) > 2 {
@@ -113,7 +117,7 @@ func runSurfaces(manager *surfaces.Manager, args []string) error {
 		return nil
 	case "activate":
 		if len(args) < 2 {
-			return errors.New("usage: ygg surfaces activate <name>")
+			return errors.New("usage: yggdrasil surfaces activate <name>")
 		}
 		if err := manager.Activate(args[1]); err != nil {
 			return err
@@ -122,7 +126,7 @@ func runSurfaces(manager *surfaces.Manager, args []string) error {
 		return nil
 	case "deactivate":
 		if len(args) < 2 {
-			return errors.New("usage: ygg surfaces deactivate <name>")
+			return errors.New("usage: yggdrasil surfaces deactivate <name>")
 		}
 		if err := manager.Deactivate(args[1]); err != nil {
 			return err
@@ -153,7 +157,7 @@ func runIntegrations(manager *integrations.Manager, args []string) error {
 		return nil
 	case "install":
 		if len(args) < 2 {
-			return errors.New("usage: ygg integrations install <slug>")
+			return errors.New("usage: yggdrasil integrations install <slug>")
 		}
 		entry, source, err := manager.Install(args[1])
 		if err != nil {
@@ -163,7 +167,7 @@ func runIntegrations(manager *integrations.Manager, args []string) error {
 		return nil
 	case "remove":
 		if len(args) < 2 {
-			return errors.New("usage: ygg integrations remove <slug>")
+			return errors.New("usage: yggdrasil integrations remove <slug>")
 		}
 		entry, err := manager.Remove(args[1])
 		if err != nil {
@@ -216,47 +220,53 @@ func findRoot() (string, error) {
 }
 
 func printUsage() {
-	fmt.Println(`ygg - Yggdrasil workspace helper
+	fmt.Println(`yggdrasil - Yggdrasil platform CLI
 
 Usage:
-  ygg integrations list
-  ygg integrations install <slug>
-  ygg integrations remove <slug>
-  ygg integrations tui
-  ygg integrations installed
-  ygg surfaces list
-  ygg surfaces active
-  ygg surfaces install <name>
-  ygg surfaces remove <name>
-  ygg surfaces installed
-  ygg surfaces scaffold <name> [module]
-  ygg surfaces activate <name>
-  ygg surfaces deactivate <name>`)
+  yggdrasil install <repo_ref>                       quickstart-install an integration on a remote yggdrasil-core
+  yggdrasil integrations list
+  yggdrasil integrations install <slug>              clone an integration into the local workspace (dev mode)
+  yggdrasil integrations remove <slug>
+  yggdrasil integrations tui
+  yggdrasil integrations installed
+  yggdrasil surfaces list
+  yggdrasil surfaces active
+  yggdrasil surfaces install <name>
+  yggdrasil surfaces remove <name>
+  yggdrasil surfaces installed
+  yggdrasil surfaces scaffold <name> [module]
+  yggdrasil surfaces activate <name>
+  yggdrasil surfaces deactivate <name>
+
+Run 'yggdrasil install --help' for the quickstart flow's flags.`)
 }
 
 func printIntegrationsUsage() {
-	fmt.Println(`ygg integrations
+	fmt.Println(`yggdrasil integrations - workspace dev helper
 
 Usage:
-  ygg integrations list
-  ygg integrations install <slug>
-  ygg integrations remove <slug>
-  ygg integrations tui
-  ygg integrations installed`)
+  yggdrasil integrations list
+  yggdrasil integrations install <slug>
+  yggdrasil integrations remove <slug>
+  yggdrasil integrations tui
+  yggdrasil integrations installed
+
+To install an integration on a REMOTE yggdrasil-core (the adopter flow), use:
+  yggdrasil install <repo_ref>`)
 }
 
 func printSurfacesUsage() {
-	fmt.Println(`ygg surfaces
+	fmt.Println(`yggdrasil surfaces
 
 Usage:
-  ygg surfaces list
-  ygg surfaces active
-  ygg surfaces install <name>
-  ygg surfaces remove <name>
-  ygg surfaces installed
-  ygg surfaces scaffold <name> [module]
-  ygg surfaces activate <name>
-  ygg surfaces deactivate <name>`)
+  yggdrasil surfaces list
+  yggdrasil surfaces active
+  yggdrasil surfaces install <name>
+  yggdrasil surfaces remove <name>
+  yggdrasil surfaces installed
+  yggdrasil surfaces scaffold <name> [module]
+  yggdrasil surfaces activate <name>
+  yggdrasil surfaces deactivate <name>`)
 }
 
 func exitErr(err error) {

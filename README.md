@@ -39,7 +39,7 @@ yggdrasil/
 │   ├── surfaces.json
 │   └── surfaces.active
 ├── cmd/
-│   └── ygg/
+│   └── yggdrasil/
 └── integrations/
     └── <installed-submodules>
 ```
@@ -111,8 +111,8 @@ task integrations:tui
 Também dá para usar a CLI diretamente:
 
 ```bash
-./scripts/ygg.sh integrations list
-./scripts/ygg.sh integrations install rabbitmq
+./scripts/yggdrasil.sh integrations list
+./scripts/yggdrasil.sh integrations install rabbitmq
 ```
 
 Se você quiser forçar instalação a partir de repositórios locais durante desenvolvimento, isso agora é opt-in explícito:
