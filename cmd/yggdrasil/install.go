@@ -43,14 +43,18 @@ Flags:
 		fs.PrintDefaults()
 	}
 
-	if err := fs.Parse(args); err != nil {
+	// flag.Parse stops at the first non-flag arg, which makes "yggdrasil
+	// install <repo_ref> --flags ..." silently drop the trailing flags.
+	// Reorder: pull the first non-flag arg out as repo_ref and parse the
+	// rest as flags. Keeps the natural CLI ordering working.
+	repoRefRaw, flagArgs := splitRepoRefAndFlags(args)
+	if err := fs.Parse(flagArgs); err != nil {
 		return err
 	}
-	if fs.NArg() < 1 {
+	if repoRefRaw == "" {
 		fs.Usage()
 		return fmt.Errorf("repo_ref is required")
 	}
-	repoRefRaw := fs.Arg(0)
 
 	ref, err := quickstartcli.ParseRepoRef(repoRefRaw)
 	if err != nil {
@@ -135,3 +139,53 @@ type multiStringFlag []string
 
 func (m *multiStringFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiStringFlag) Set(s string) error { *m = append(*m, s); return nil }
+
+// installBoolFlags lists the flag names this subcommand declares as
+// booleans. Used by splitRepoRefAndFlags to decide whether the token after
+// "--foo" is its value (string flag) or the next positional (bool flag).
+var installBoolFlags = map[string]bool{
+	"dry-run":         true,
+	"non-interactive": true,
+	"yes":             true,
+	"h":               true,
+	"help":            true,
+}
+
+// splitRepoRefAndFlags pulls the first non-flag argument out of args (the
+// repo_ref) and returns it alongside the rest. This lets the CLI accept
+// "install <ref> --flags" — the stdlib flag package would otherwise stop
+// at <ref> and silently drop the flags after it.
+//
+// Boolean flags (see installBoolFlags) DON'T consume the next arg, so a
+// token sitting between "--non-interactive" and another flag is the
+// repo_ref. Other flags ("--server URL", "--input k=v") DO consume it.
+func splitRepoRefAndFlags(args []string) (string, []string) {
+	flags := make([]string, 0, len(args))
+	var repoRef string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") {
+			if repoRef == "" {
+				repoRef = a
+				continue
+			}
+			flags = append(flags, a)
+			continue
+		}
+		flags = append(flags, a)
+		name := strings.TrimLeft(a, "-")
+		if eq := strings.Index(name, "="); eq >= 0 {
+			name = name[:eq]
+			continue // value already attached
+		}
+		if installBoolFlags[name] {
+			continue // bool flag — does not consume next arg
+		}
+		// String flag with space-separated value. Consume it.
+		if i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	return repoRef, flags
+}

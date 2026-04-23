@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -90,13 +91,32 @@ func FetchManifest(ctx context.Context, ref RepoRef) (QuickstartDocument, []byte
 	return doc, raw, nil
 }
 
+// fetchRawManifest hits the GitHub contents API when a $GITHUB_TOKEN /
+// $YGGDRASIL_GITHUB_TOKEN is set (so private repos work), and falls back
+// to raw.githubusercontent.com otherwise (zero-config for public repos).
 func fetchRawManifest(ctx context.Context, ref RepoRef) ([]byte, error) {
-	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", ref.Owner, ref.Repo, ref.Ref, ref.Path)
+	token := strings.TrimSpace(os.Getenv("YGGDRASIL_GITHUB_TOKEN"))
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	}
+
+	var url string
+	headers := map[string]string{"User-Agent": "yggdrasil-cli/quickstart"}
+	if token != "" {
+		url = fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", ref.Owner, ref.Repo, ref.Path, ref.Ref)
+		headers["Authorization"] = "Bearer " + token
+		headers["Accept"] = "application/vnd.github.raw"
+	} else {
+		url = fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", ref.Owner, ref.Repo, ref.Ref, ref.Path)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("User-Agent", "yggdrasil-cli/quickstart")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -106,7 +126,8 @@ func fetchRawManifest(ctx context.Context, ref RepoRef) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch %s: HTTP %d", url, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("fetch %s: HTTP %d %s", url, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
