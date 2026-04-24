@@ -16,8 +16,17 @@ services:
       timeout: 3s
       retries: 20
 
+  # Opt-in AMQP rpc.Transport backend. Only started when the `amqp`
+  # compose profile is activated:
+  #
+  #   docker compose --profile amqp up -d
+  #
+  # When inactive, the core boots HTTP-only (the HTTP transport is
+  # always available). Leave BROKER_URL unset in .env to skip this
+  # backend entirely.
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
+    profiles: ["amqp"]
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-yggdrasil}
@@ -40,7 +49,9 @@ services:
       DB_NAME: ${POSTGRES_DB:-yggdrasil}
       DB_USER: ${POSTGRES_USER:-yggdrasil}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-yggdrasil}
-      BROKER_URL: amqp://${RABBITMQ_USER:-yggdrasil}:${RABBITMQ_PASSWORD:-yggdrasil}@rabbitmq:5672/
+      # Opt-in AMQP backend. Set BROKER_URL in .env to enable; empty
+      # means HTTP-only.
+      BROKER_URL: ${BROKER_URL:-}
       AUTH_SESSION_TTL_HOURS: ${AUTH_SESSION_TTL_HOURS:-720}
       AUTH_SESSION_COOKIE_NAME: ${AUTH_SESSION_COOKIE_NAME:-yggdrasil_session}
       AUTH_SESSION_COOKIE_SECURE: "false"
@@ -57,8 +68,6 @@ services:
       - "${CORE_HTTP_PORT:-9080}:9080"
     depends_on:
       postgres:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
 
 volumes:
