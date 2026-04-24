@@ -28,6 +28,7 @@ import (
 func runGet(args []string) error {
 	fs := flag.NewFlagSet("get", flag.ContinueOnError)
 	namespace := fs.String("namespace", "", "filter by namespace")
+	fs.StringVar(namespace, "n", "", "short for --namespace")
 	output := fs.String("o", "table", "output format: table | yaml | json")
 	activeOnly := fs.Bool("active-only", false, "only return manifests whose metadata.active is true")
 	server := fs.String("server", "", "override context server URL")

@@ -13,59 +13,79 @@ import (
 )
 
 func main() {
+	if len(os.Args) < 2 {
+		printUsage()
+		return
+	}
+
+	// Adopter-facing subcommands work from any directory — they only
+	// need a yggdrasil-core to talk to. Workspace-dev subcommands
+	// (integrations/surfaces) require the monorepo layout, so findRoot
+	// is only invoked when we're about to enter one of those.
+	switch os.Args[1] {
+	case "init":
+		if err := runInit(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
+	case "login":
+		if err := runLogin(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
+	case "apply":
+		if err := runApply(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
+	case "get":
+		if err := runGet(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
+	case "describe":
+		if err := runDescribe(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
+	case "logs":
+		if err := runLogs(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
+	case "status":
+		if err := runStatus(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
+	case "version", "--version":
+		if err := runVersion(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
+	case "auth":
+		if err := runAuth(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
+	case "help", "-h", "--help":
+		printUsage()
+		return
+	}
+
+	// The remaining subcommands are workspace-dev helpers and need the
+	// yggdrasil monorepo root.
 	root, err := findRoot()
 	if err != nil {
 		exitErr(err)
 	}
-
 	manager, err := integrations.NewManager(root)
 	if err != nil {
 		exitErr(err)
 	}
 	surfaceManager := surfaces.NewManager(root)
 
-	if len(os.Args) < 2 {
-		printUsage()
-		return
-	}
-
 	switch os.Args[1] {
-	case "init":
-		if err := runInit(os.Args[2:]); err != nil {
-			exitErr(err)
-		}
-	case "login":
-		if err := runLogin(os.Args[2:]); err != nil {
-			exitErr(err)
-		}
-	case "apply":
-		if err := runApply(os.Args[2:]); err != nil {
-			exitErr(err)
-		}
-	case "get":
-		if err := runGet(os.Args[2:]); err != nil {
-			exitErr(err)
-		}
-	case "describe":
-		if err := runDescribe(os.Args[2:]); err != nil {
-			exitErr(err)
-		}
-	case "logs":
-		if err := runLogs(os.Args[2:]); err != nil {
-			exitErr(err)
-		}
-	case "status":
-		if err := runStatus(os.Args[2:]); err != nil {
-			exitErr(err)
-		}
-	case "version", "--version":
-		if err := runVersion(os.Args[2:]); err != nil {
-			exitErr(err)
-		}
-	case "auth":
-		if err := runAuth(os.Args[2:]); err != nil {
-			exitErr(err)
-		}
 	case "integrations":
 		if err := runIntegrations(manager, os.Args[2:]); err != nil {
 			exitErr(err)
@@ -78,8 +98,6 @@ func main() {
 		if err := runInstall(os.Args[2:]); err != nil {
 			exitErr(err)
 		}
-	case "help", "-h", "--help":
-		printUsage()
 	default:
 		exitErr(fmt.Errorf("unknown command: %s", os.Args[1]))
 	}

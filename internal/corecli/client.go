@@ -181,21 +181,24 @@ func (c *Client) Readyz(ctx context.Context) error {
 }
 
 // CreateManifest POSTs a manifest document through the generic
-// /api/v1/<kind>s endpoint. Returns the server-assigned record.
+// /api/v1/manifests?kind=<kind> endpoint. Returns the server-assigned
+// record. The kind travels as a query parameter so one URL covers
+// every manifest shape — no per-kind URL table in the CLI.
 func (c *Client) CreateManifest(ctx context.Context, kind string, payload any) (map[string]any, error) {
 	var resp struct {
 		Manifest map[string]any `json:"manifest"`
 	}
-	if err := c.Do(ctx, http.MethodPost, "/api/v1/"+kind+"s", payload, &resp); err != nil {
+	if err := c.Do(ctx, http.MethodPost, "/api/v1/manifests?kind="+url.QueryEscape(kind), payload, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Manifest, nil
 }
 
-// ListManifests hits /api/v1/<kind>s?namespace=&name=&active_only=
+// ListManifests hits /api/v1/manifests?kind=<kind>&namespace=&name=
 // and returns the raw list payload for the caller to format.
 func (c *Client) ListManifests(ctx context.Context, kind string, namespace, name string, activeOnly bool) ([]map[string]any, error) {
 	q := url.Values{}
+	q.Set("kind", kind)
 	if namespace != "" {
 		q.Set("namespace", namespace)
 	}
@@ -205,14 +208,10 @@ func (c *Client) ListManifests(ctx context.Context, kind string, namespace, name
 	if activeOnly {
 		q.Set("active_only", "true")
 	}
-	path := "/api/v1/" + kind + "s"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
 	var resp struct {
 		Manifests []map[string]any `json:"manifests"`
 	}
-	if err := c.Do(ctx, http.MethodGet, path, nil, &resp); err != nil {
+	if err := c.Do(ctx, http.MethodGet, "/api/v1/manifests?"+q.Encode(), nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Manifests, nil

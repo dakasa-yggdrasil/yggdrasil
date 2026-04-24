@@ -19,6 +19,7 @@ import (
 func runDescribe(args []string) error {
 	fs := flag.NewFlagSet("describe", flag.ContinueOnError)
 	namespace := fs.String("namespace", "", "namespace (required when ambiguous)")
+	fs.StringVar(namespace, "n", "", "short for --namespace")
 	server := fs.String("server", "", "override context server URL")
 	token := fs.String("token", "", "override context bearer token")
 	fs.Usage = func() {
