@@ -70,6 +70,31 @@ services:
       postgres:
         condition: service_healthy
 
+  # Kubernetes adapter — consumed by workflows that apply K8s objects
+  # in an adopter's cluster (e.g. yggdrasil-deploy-control-plane).
+  # Needs a kubeconfig mounted; KUBECONFIG_PATH defaults to the
+  # caller's ~/.kube/config.
+  integration-kubernetes:
+    image: ${INTEGRATION_KUBERNETES_IMAGE:-ghcr.io/dakasa-yggdrasil/integration-kubernetes:latest}
+    restart: unless-stopped
+    environment:
+      YGGDRASIL_TRANSPORT: http
+      ADAPTER_PORT: "8081"
+      HEALTHCHECK_PORT: "8080"
+    volumes:
+      - ${KUBECONFIG_PATH:-${HOME}/.kube/config}:/root/.kube/config:ro
+
+  # Schema-migrations adapter (goose-postgres provider). Used by
+  # workflows that apply versioned SQL migrations against a target
+  # Postgres — including the core's own self-migration path.
+  integration-schema-migrations:
+    image: ${INTEGRATION_SCHEMA_MIGRATIONS_IMAGE:-ghcr.io/dakasa-yggdrasil/integration-schema-migrations:latest}
+    restart: unless-stopped
+    environment:
+      YGGDRASIL_TRANSPORT: http
+      ADAPTER_PORT: "8082"
+      HEALTHCHECK_PORT: "8080"
+
 volumes:
   yggdrasil-postgres-data:
   yggdrasil-rabbitmq-data:
