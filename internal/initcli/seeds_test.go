@@ -24,16 +24,16 @@ func TestDefaultTopologyInstances_Shape(t *testing.T) {
 	}
 
 	expected := map[string]struct {
-		typeRef  string
-		endpoint string
+		typeRef string
+		baseURL string
 	}{
 		"yggdrasil-core-kubernetes": {
-			typeRef:  "kubernetes",
-			endpoint: "http://integration-kubernetes:8081",
+			typeRef: "kubernetes",
+			baseURL: "http://integration-kubernetes:8081",
 		},
 		"yggdrasil-core-schema-migrations": {
-			typeRef:  "schema-migrations-goose-postgres",
-			endpoint: "http://integration-schema-migrations:8082",
+			typeRef: "schema-migrations-goose-postgres",
+			baseURL: "http://integration-schema-migrations:8082",
 		},
 	}
 
@@ -49,9 +49,10 @@ func TestDefaultTopologyInstances_Shape(t *testing.T) {
 			t.Errorf("%s namespace = %q, want global", name, ns)
 		}
 		spec, _ := inst["spec"].(map[string]any)
-		endpoint, _ := spec["endpoint"].(string)
-		if endpoint != exp.endpoint {
-			t.Errorf("%s endpoint = %q, want %q", name, endpoint, exp.endpoint)
+		config, _ := spec["config"].(map[string]any)
+		baseURL, _ := config["base_url"].(string)
+		if baseURL != exp.baseURL {
+			t.Errorf("%s config.base_url = %q, want %q", name, baseURL, exp.baseURL)
 		}
 		typeRef, _ := spec["type_ref"].(map[string]any)
 		refName, _ := typeRef["name"].(string)
@@ -113,8 +114,10 @@ func TestApplyTopologyInstances_PostsExpectedManifests(t *testing.T) {
 	}
 	gotNames := map[string]bool{}
 	for _, body := range posted {
-		metadata, _ := body["metadata"].(map[string]any)
-		name, _ := metadata["name"].(string)
+		// The core's POST /api/v1/manifests endpoint takes a flat
+		// payload (name/namespace/spec at top level), not a nested
+		// manifest envelope.
+		name, _ := body["name"].(string)
 		gotNames[name] = true
 	}
 	for _, want := range []string{"yggdrasil-core-kubernetes", "yggdrasil-core-schema-migrations"} {

@@ -88,7 +88,30 @@ Flags:
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	if _, err := client.CreateManifest(ctx, "control_plane", doc); err != nil {
+	// The core's create-manifest endpoint takes a flat payload
+	// (name/namespace/description/labels/spec at top level), not a
+	// nested envelope. We pull the pieces out of the parsed doc and
+	// reshape.
+	payload := map[string]any{
+		"name":      manifestName,
+		"namespace": manifestNamespace,
+		"spec":      doc["spec"],
+	}
+	if description, ok := metadata["description"].(string); ok && description != "" {
+		payload["description"] = description
+	}
+	if rawLabels, ok := metadata["labels"].(map[string]any); ok && len(rawLabels) > 0 {
+		labels := make(map[string]string, len(rawLabels))
+		for k, v := range rawLabels {
+			if s, ok := v.(string); ok {
+				labels[k] = s
+			}
+		}
+		if len(labels) > 0 {
+			payload["labels"] = labels
+		}
+	}
+	if _, err := client.CreateManifest(ctx, "control_plane", payload); err != nil {
 		return fmt.Errorf("apply control_plane manifest: %w", err)
 	}
 	fmt.Printf("✓ applied control_plane %s/%s\n", manifestNamespace, manifestName)

@@ -52,8 +52,11 @@ func kubernetesInstance() map[string]any {
 				"namespace": "global",
 				"name":      "kubernetes",
 			},
-			"endpoint": "http://integration-kubernetes:8081",
 			"config": map[string]any{
+				// base_url is the convention http_json-transport
+				// adapters read to build their endpoint URL; it's a
+				// standard config field, not a custom one.
+				"base_url":          "http://integration-kubernetes:8081",
 				"in_cluster":        false,
 				"kubeconfig_path":   "/root/.kube/config",
 				"default_namespace": "default",
@@ -83,7 +86,9 @@ func schemaMigrationsInstance() map[string]any {
 				"namespace": "global",
 				"name":      "schema-migrations-goose-postgres",
 			},
-			"endpoint": "http://integration-schema-migrations:8082",
+			"config": map[string]any{
+				"base_url": "http://integration-schema-migrations:8082",
+			},
 		},
 	}
 }
@@ -94,17 +99,36 @@ func schemaMigrationsInstance() map[string]any {
 // instance silently would yield a mysterious "no instance" error the
 // first time a workflow tries to dispatch, so we fail fast and let
 // the caller surface a diagnostic.
+//
+// The manifest API is flat: the server's payload struct has name,
+// namespace, description, labels, spec at the top level (not a nested
+// metadata block). We shape the POST body to match.
 func applyTopologyInstances(ctx context.Context, server, token string) error {
 	client := corecli.NewClient(server, token)
 	for _, instance := range defaultTopologyInstances() {
-		spec, _ := instance["spec"].(map[string]any)
 		metadata, _ := instance["metadata"].(map[string]any)
 		name, _ := metadata["name"].(string)
-		if _, err := client.CreateManifest(ctx, "integration_instance", map[string]any{
-			"apiVersion": instance["apiVersion"],
-			"metadata":   metadata,
-			"spec":       spec,
-		}); err != nil {
+		namespace, _ := metadata["namespace"].(string)
+		description, _ := metadata["description"].(string)
+		rawLabels, _ := metadata["labels"].(map[string]any)
+		labels := make(map[string]string, len(rawLabels))
+		for k, v := range rawLabels {
+			if s, ok := v.(string); ok {
+				labels[k] = s
+			}
+		}
+		payload := map[string]any{
+			"name":      name,
+			"namespace": namespace,
+			"spec":      instance["spec"],
+		}
+		if description != "" {
+			payload["description"] = description
+		}
+		if len(labels) > 0 {
+			payload["labels"] = labels
+		}
+		if _, err := client.CreateManifest(ctx, "integration_instance", payload); err != nil {
 			return fmt.Errorf("apply integration_instance %q: %w", name, shortenCoreError(err))
 		}
 	}
