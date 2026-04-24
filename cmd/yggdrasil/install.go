@@ -33,10 +33,12 @@ Usage:
   yggdrasil install <repo_ref> [--provider id] [--input k=v ...] [--dry-run] [--non-interactive]
 
 repo_ref:
-  owner/repo                          default branch + yggdrasil-quickstart.yaml
-  owner/repo@v1.2.3                   pinned ref
-  owner/repo:custom/path.yaml         custom manifest path
-  owner/repo@ref:path                 both
+  owner/repo                          GitHub: default branch + yggdrasil-quickstart.yaml
+  owner/repo@v1.2.3                   GitHub: pinned ref
+  owner/repo:custom/path.yaml         GitHub: custom manifest path
+  owner/repo@ref:path                 GitHub: both
+  oci://ghcr.io/owner/repo            OCI: latest tag
+  oci://ghcr.io/owner/repo:v1.2.3     OCI: specific tag
 
 Flags:
 `)
@@ -67,7 +69,7 @@ Flags:
 	}
 
 	ctx := context.Background()
-	doc, _, err := quickstartcli.FetchManifest(ctx, ref)
+	doc, raw, err := quickstartcli.FetchManifest(ctx, ref)
 	if err != nil {
 		return err
 	}
@@ -105,12 +107,23 @@ Flags:
 		}
 	}
 
+	// For OCI refs, pass the already-fetched bytes inline so the
+	// server doesn't need to re-authenticate to the registry. For
+	// GitHub refs the server can fetch via raw.githubusercontent
+	// without extra auth — cleaner audit trail when the server does
+	// the fetch itself.
+	var inlineManifest []byte
+	if ref.OCI != nil {
+		inlineManifest = raw
+	}
+
 	client := quickstartcli.NewClient(*server, *token)
 	resp, err := client.Install(ctx, quickstartcli.InstallRequest{
-		RepoRef:    ref.String(),
-		ProviderID: chosenProvider.ID,
-		Inputs:     inputs,
-		DryRun:     *dryRun,
+		RepoRef:        ref.String(),
+		ManifestInline: inlineManifest,
+		ProviderID:     chosenProvider.ID,
+		Inputs:         inputs,
+		DryRun:         *dryRun,
 	})
 	if err != nil {
 		return err

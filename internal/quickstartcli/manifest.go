@@ -18,15 +18,29 @@ import (
 // suffix of repo_ref ("owner/repo:custom/path.yaml").
 const DefaultManifestPath = "yggdrasil-quickstart.yaml"
 
-// RepoRef is the parsed form of a repo_ref string ("owner/repo[@ref][:path]").
+// RepoRef is the parsed form of a repo_ref string. Two forms are
+// supported:
+//
+//   - GitHub: "owner/repo[@ref][:path]" — Owner/Repo/Ref/Path set, OCI nil.
+//   - OCI:    "oci://<registry>/<path>[:<tag>]" — OCI set, Owner empty.
+//
+// Downstream fetchers branch on OCI != nil to pick the right
+// transport. Keeping a single RepoRef type (rather than an interface)
+// means the rest of the CLI doesn't change — server payloads still
+// receive a canonical String() representation.
 type RepoRef struct {
 	Owner string
 	Repo  string
 	Ref   string
 	Path  string
+
+	OCI *OCIRef
 }
 
 func (r RepoRef) String() string {
+	if r.OCI != nil {
+		return r.OCI.String()
+	}
 	out := r.Owner + "/" + r.Repo
 	if r.Ref != "" && r.Ref != "main" {
 		out += "@" + r.Ref
@@ -37,13 +51,25 @@ func (r RepoRef) String() string {
 	return out
 }
 
-// ParseRepoRef accepts "owner/repo[@ref][:path]" and applies defaults
-// (ref=main, path=yggdrasil-quickstart.yaml). Mirrors the server-side parser
-// so that the CLI's representation matches what the install endpoint sees.
+// ParseRepoRef accepts either:
+//
+//   - "oci://<registry>/<path>[:<tag>]"
+//   - "owner/repo[@ref][:path]" (GitHub)
+//
+// and applies defaults (ref=main, path=yggdrasil-quickstart.yaml for
+// GitHub; tag=latest for OCI). Mirrors the server-side parser so the
+// CLI's representation matches what the install endpoint sees.
 func ParseRepoRef(raw string) (RepoRef, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return RepoRef{}, fmt.Errorf("repo_ref is required")
+	}
+	if IsOCIRef(raw) {
+		ref, err := ParseOCIRef(raw)
+		if err != nil {
+			return RepoRef{}, err
+		}
+		return RepoRef{OCI: &ref}, nil
 	}
 
 	rest := raw
@@ -91,10 +117,14 @@ func FetchManifest(ctx context.Context, ref RepoRef) (QuickstartDocument, []byte
 	return doc, raw, nil
 }
 
-// fetchRawManifest hits the GitHub contents API when a $GITHUB_TOKEN /
-// $YGGDRASIL_GITHUB_TOKEN is set (so private repos work), and falls back
-// to raw.githubusercontent.com otherwise (zero-config for public repos).
+// fetchRawManifest routes to the right transport based on the parsed
+// RepoRef: OCI registries use the Distribution v2 API; GitHub refs
+// hit the contents API when a token is set (so private repos work)
+// and fall back to raw.githubusercontent.com otherwise.
 func fetchRawManifest(ctx context.Context, ref RepoRef) ([]byte, error) {
+	if ref.OCI != nil {
+		return FetchOCIManifest(ctx, *ref.OCI)
+	}
 	token := strings.TrimSpace(os.Getenv("YGGDRASIL_GITHUB_TOKEN"))
 	if token == "" {
 		token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))

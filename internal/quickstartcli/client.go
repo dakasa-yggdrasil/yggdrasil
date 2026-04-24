@@ -12,11 +12,17 @@ import (
 )
 
 // InstallRequest mirrors the server's InstallIntegrationRequest.
+//
+// ManifestInline lets the CLI bypass the server's re-fetch when the
+// CLI has already authenticated to an OCI registry — the server
+// validates the bytes directly. Empty ManifestInline means the
+// server fetches from RepoRef itself.
 type InstallRequest struct {
-	RepoRef    string         `json:"repo_ref"`
-	ProviderID string         `json:"provider_id,omitempty"`
-	Inputs     map[string]any `json:"inputs,omitempty"`
-	DryRun     bool           `json:"dry_run,omitempty"`
+	RepoRef        string         `json:"repo_ref"`
+	ManifestInline []byte         `json:"manifest_inline,omitempty"`
+	ProviderID     string         `json:"provider_id,omitempty"`
+	Inputs         map[string]any `json:"inputs,omitempty"`
+	DryRun         bool           `json:"dry_run,omitempty"`
 }
 
 // InstallResponse mirrors the server's InstallIntegrationResponse.
