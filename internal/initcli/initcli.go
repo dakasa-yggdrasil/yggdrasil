@@ -145,7 +145,23 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, fmt.Errorf("yggdrasil-core did not become ready: %w", err)
 	}
 
-	return finalizeLoginAndConfig(ctx, opts, result)
+	result, err = finalizeLoginAndConfig(ctx, opts, result)
+	if err != nil {
+		return result, err
+	}
+
+	// Seed the topology-specific integration_instance manifests that
+	// point at the adapter services baked into the standalone compose.
+	// These cannot live in yggdrasil-core's shipped seeds (URLs are
+	// deployment-specific) but are essential for workflows like
+	// yggdrasil-deploy-control-plane to find an adapter to dispatch
+	// to. Standalone-mode only — existing-cluster deployments bring
+	// their own instances.
+	if err := applyTopologyInstances(ctx, result.Server, result.Token); err != nil {
+		return result, fmt.Errorf("register adapter instances: %w", err)
+	}
+
+	return result, nil
 }
 
 func finalizeExistingCluster(ctx context.Context, opts Options, result Result) (Result, error) {

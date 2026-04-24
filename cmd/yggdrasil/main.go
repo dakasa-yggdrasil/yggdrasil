@@ -73,6 +73,11 @@ func main() {
 			exitErr(err)
 		}
 		return
+	case "deploy":
+		if err := runDeploy(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -282,7 +287,7 @@ func printUsage() {
 	fmt.Println(`yggdrasil — self-hosted control plane CLI
 
 Bootstrap & connection:
-  yggdrasil init [--dir <path>]                      one-command standalone bootstrap (Postgres + RMQ + core)
+  yggdrasil init [--dir <path>]                      one-command standalone bootstrap (Postgres + core + adapters)
   yggdrasil init --server <url>                      attach to an existing yggdrasil-core
   yggdrasil login --server <url> --username <slug>   exchange credentials for a session token
   yggdrasil status                                   show active context + health
@@ -293,6 +298,9 @@ Manifest operations (require an active context):
   yggdrasil get <kind> [<name>]                      list or fetch manifests
   yggdrasil describe <kind> <name>                   print one manifest as YAML
   yggdrasil logs <run-id>                            stream a workflow run
+
+Control plane deployment:
+  yggdrasil deploy control-plane -f cp.yaml          apply a control_plane manifest and run the deploy workflow
 
 Auth & providers:
   yggdrasil auth provider list                       list configured OAuth/OIDC providers

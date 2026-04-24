@@ -194,6 +194,50 @@ func (c *Client) CreateManifest(ctx context.Context, kind string, payload any) (
 	return resp.Manifest, nil
 }
 
+// WorkflowRunStep is one step in a workflow run result. Fields mirror
+// core's WorkflowRunStepResult; we intentionally keep this in the CLI
+// package rather than import the core's model package — the wire
+// shape is the only contract we care about and CLI should not take a
+// heavy dep on the core module graph.
+type WorkflowRunStep struct {
+	ID         string         `json:"id"`
+	Kind       string         `json:"kind"`
+	Operation  string         `json:"operation,omitempty"`
+	Capability string         `json:"capability,omitempty"`
+	Status     string         `json:"status"`
+	Attempts   int            `json:"attempts,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
+// WorkflowRunResult is the full response of POST /api/v1/workflow-runs.
+type WorkflowRunResult struct {
+	Workflow map[string]any    `json:"workflow"`
+	Status   string            `json:"status"`
+	Steps    []WorkflowRunStep `json:"steps"`
+	Metadata map[string]any    `json:"metadata,omitempty"`
+}
+
+// RunWorkflow dispatches a workflow run by (namespace, name) and
+// returns the synchronous result. The core blocks until the run
+// finishes or a step fails — no separate polling round-trip needed.
+func (c *Client) RunWorkflow(ctx context.Context, namespace, name string, inputs map[string]any) (WorkflowRunResult, error) {
+	payload := map[string]any{
+		"workflow": map[string]any{
+			"namespace": namespace,
+			"name":      name,
+		},
+	}
+	if inputs != nil {
+		payload["inputs"] = inputs
+	}
+	var result WorkflowRunResult
+	if err := c.Do(ctx, http.MethodPost, "/api/v1/workflow-runs", payload, &result); err != nil {
+		return WorkflowRunResult{}, err
+	}
+	return result, nil
+}
+
 // ListManifests hits /api/v1/manifests?kind=<kind>&namespace=&name=
 // and returns the raw list payload for the caller to format.
 func (c *Client) ListManifests(ctx context.Context, kind string, namespace, name string, activeOnly bool) ([]map[string]any, error) {
