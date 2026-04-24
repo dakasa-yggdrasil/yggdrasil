@@ -1,0 +1,37 @@
+name: release
+
+# Publishes yggdrasil CLI binaries to a tagged GitHub Release via
+# goreleaser. See .goreleaser.yaml for the exact matrix of OS/arch
+# combinations produced.
+#
+# Triggers only on vX.Y.Z tags so main-branch pushes stay cheap.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
