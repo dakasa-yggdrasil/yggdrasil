@@ -1,278 +1,186 @@
-# yggdrasil
+<div align="center">
 
-`yggdrasil` agora é o repositório do produto.
+# `yggdrasil`
 
-Ele junta os microsserviços centrais, o catálogo de plugins e a automação local em um único
-workspace, mas preservando fronteiras de runtime entre os serviços.
+**Official CLI for the [Yggdrasil](https://github.com/dakasa-yggdrasil/yggdrasil-core) control plane**
 
-Em outras palavras:
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/go-1.25-00ADD8.svg)](go.mod)
+[![Release](https://img.shields.io/github/v/release/dakasa-yggdrasil/yggdrasil?include_prereleases&sort=semver)](https://github.com/dakasa-yggdrasil/yggdrasil/releases)
 
-- o repo é único
-- o produto é único
-- o runtime continua dividido em microsserviços
-- só o `yggdrasil-core` é parte obrigatória do coração do produto
-- o console de referência fala direto com o `yggdrasil-core` por HTTP
-- auth e consoles vivem como surfaces substituíveis
-- plugins continuam opcionais e instaláveis
+*One command bootstrap. kubectl-style manifest operations. Integration catalog installs in one line.*
 
-Com isso, evitamos o erro de um "monolito com pastas" e mantemos:
+[Install](#install) · [Commands](#commands) · [Docs](https://github.com/dakasa-yggdrasil/yggdrasil-core/tree/main/docs)
 
-- cada microsserviço tem `docker-compose.yml`
-- cada microsserviço tem `Taskfile.yml`
-- a infraestrutura comum fica centralizada
-- o stack completo pode subir como uma única composição
-- integrations são instaladas sob demanda, como `git submodule`
+</div>
 
-## Estrutura
+---
 
-```text
-yggdrasil/
-├── dev/
-│   └── compose/
-├── services/
-│   └── yggdrasil-core/
-├── surfaces/
-│   ├── yggdrasil-auth-surface/ # surface instalada quando presente
-│   ├── yggdrasil-console/      # surface instalada quando presente
-├── catalog/
-│   ├── integrations.json
-│   ├── surfaces.json
-│   └── surfaces.active
-├── cmd/
-│   └── yggdrasil/
-└── integrations/
-    └── <installed-submodules>
+## What it does
+
+`yggdrasil` is the terminal interface to a self-hosted
+[Yggdrasil control plane](https://github.com/dakasa-yggdrasil/yggdrasil-core).
+Think of it as `kubectl` for workflows, integrations, and the rest of the
+Yggdrasil manifest catalog — plus a one-command bootstrap that brings up the
+entire stack on a fresh host.
+
+```sh
+yggdrasil init                                                # Boot Postgres + RabbitMQ + core + admin in one command
+yggdrasil install dakasa-yggdrasil/integration-kubernetes     # Install an integration from the catalog
+yggdrasil apply -f my-workflow.yaml                           # Apply any manifest (YAML or JSON)
+yggdrasil get workflow -n prod                                # List manifests (table / yaml / json)
+yggdrasil logs <run-id>                                       # Stream a workflow run's step results
 ```
 
-## Convenções
+## Install
 
-- infraestrutura compartilhada em [`dev/compose/infra.yml`](/Users/dakasa/projects/yggdrasil/dev/compose/infra.yml)
-- variáveis globais em `.env`
-- overrides por serviço em `./services/*/.env`, `./surfaces/*/.env` ou `./integrations/*/.env`
-- `Taskfile.yml` local sempre usa o mesmo `COMPOSE_PROJECT_NAME`, para todas as slices
-  compartilharem rede, broker e banco
-- cada `task up` local sobe só o slice pedido e as dependências dele
-- cada `task down` local para só o slice local, sem derrubar a infraestrutura compartilhada
-- integrations instaladas são descobertas dinamicamente pelo root, sem lista hardcoded
-- as surfaces ativas do runtime ficam em [`catalog/surfaces.active`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.active)
-- o catálogo de surfaces vive em [`catalog/surfaces.json`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.json)
-- as surfaces de referência são instaláveis separadamente, como repositórios próprios
-- o catálogo de integrations vive em [`catalog/integrations.json`](/Users/dakasa/projects/yggdrasil/catalog/integrations.json)
-- integrations pertencem ao core; surfaces consomem contratos do core em vez de falar com plugins diretamente
+### From release (recommended)
 
-## Primeiros passos
+Grab a prebuilt binary for your OS/arch from the
+[latest release](https://github.com/dakasa-yggdrasil/yggdrasil/releases/latest),
+then:
 
-Pré-requisitos:
-
-- Docker Desktop com `docker compose`
-- [`task`](https://taskfile.dev)
-
-Valide o ambiente:
-
-```bash
-task doctor
-task arch:check
+```sh
+# macOS (Apple Silicon example)
+curl -L https://github.com/dakasa-yggdrasil/yggdrasil/releases/latest/download/yggdrasil_$(uname -s)_$(uname -m).tar.gz | tar xz
+sudo mv yggdrasil /usr/local/bin/
+yggdrasil version
 ```
 
-Liste as integrations disponíveis:
+### From source
 
-```bash
-task integrations:list
+```sh
+go install github.com/dakasa-yggdrasil/yggdrasil/cmd/yggdrasil@latest
 ```
 
-Liste as surfaces catalogadas:
+### Via Homebrew / Scoop
 
-```bash
-task surfaces:list
-task surfaces:active
+> Package manager taps are on the roadmap. Track
+> [issue #N](https://github.com/dakasa-yggdrasil/yggdrasil/issues) for progress.
+
+## Quick start
+
+```sh
+# Boot a fresh self-hosted stack on this machine (needs Docker or colima)
+yggdrasil init
+
+# See what you've got
+yggdrasil status
+
+# Install the Kubernetes integration so workflows can apply K8s manifests
+yggdrasil install dakasa-yggdrasil/integration-kubernetes --provider kubernetes
+
+# Apply a workflow you wrote
+yggdrasil apply -f my-workflow.yaml
+
+# Watch it run
+yggdrasil logs <run-id>
 ```
 
-Instale as surfaces de referência:
+A more thorough walk-through lives in the core repo's
+[getting-started guide](https://github.com/dakasa-yggdrasil/yggdrasil-core/blob/main/docs/getting-started.md).
 
-```bash
-task surfaces:install NAME=yggdrasil-auth-surface
-task surfaces:install NAME=yggdrasil-console
+## Commands
+
+### Bootstrap and connection
+
+| Command | What it does |
+|---|---|
+| `yggdrasil init` | Bring up a full self-hosted stack via docker-compose (Postgres + RabbitMQ + core + seeded admin + catalog). Use `--server <url>` to attach to an existing yggdrasil-core instead. |
+| `yggdrasil login --server <url> --username <slug>` | Exchange credentials for a session token and save a named context to `~/.yggdrasil/config.yaml`. |
+| `yggdrasil status` | Print the active context + a health check against the server. |
+| `yggdrasil version` | Print the CLI version (and commit SHA if built from source). |
+
+### Manifest operations
+
+| Command | What it does |
+|---|---|
+| `yggdrasil apply -f <file>` | Create a new version of any manifest kind. YAML or JSON. Use `-` for stdin. |
+| `yggdrasil get <kind> [<name>]` | List (or fetch one) manifests. Supports `-n <namespace>` and `-o table\|yaml\|json`. |
+| `yggdrasil describe <kind> <name>` | Full YAML dump of one manifest. |
+| `yggdrasil logs <run-id>` | Stream a workflow run's step transitions until terminal. |
+
+### Integration catalog
+
+| Command | What it does |
+|---|---|
+| `yggdrasil install <repo_ref>` | Install an integration from a Github repo that carries a `yggdrasil-quickstart.yaml`. Interactive TUI for required inputs; `--non-interactive` and `--input k=v` for CI. |
+
+### Auth providers (OAuth/OIDC)
+
+| Command | What it does |
+|---|---|
+| `yggdrasil auth provider list` | List configured OAuth/OIDC providers. |
+| `yggdrasil auth provider apply -f <file>` | Register or update a provider (see [auth-providers/](https://github.com/dakasa-yggdrasil/yggdrasil-core/tree/main/docs/auth-providers) for GitHub + Google templates). |
+| `yggdrasil auth provider get <name>` | Fetch one provider's config. |
+| `yggdrasil auth provider delete <name>` | Remove a provider. |
+
+### Contributor helpers (monorepo dev)
+
+The following commands only work when run from a checkout of the Yggdrasil
+monorepo and are intended for contributors — not adopters:
+
+| Command | What it does |
+|---|---|
+| `yggdrasil integrations list|install|tui|installed` | Clone an integration repo into the local workspace for dev. |
+| `yggdrasil surfaces list|install|scaffold|activate` | Manage UI surfaces in the local workspace. |
+
+## Configuration
+
+Config lives at `~/.yggdrasil/config.yaml` (kubectl-style multi-context).
+Structure:
+
+```yaml
+current_context: local
+contexts:
+  local:
+    server: http://localhost:9080
+    token: ys_...
+    collaborator: admin
+  prod:
+    server: https://yggdrasil.example.com
+    token: ys_...
+    collaborator: ops-bot
 ```
 
-Crie uma nova surface a partir da base oficial [`surface-template`](https://github.com/dakasa-yggdrasil/surface-template).
+Switch contexts for one command without editing the file:
 
-Se você só quiser um scaffold rápido dentro do workspace local, ainda existe o atalho:
-
-```bash
-task surfaces:scaffold NAME=my-domain-api
+```sh
+YGGDRASIL_CONTEXT=prod yggdrasil get workflow
 ```
 
-Abra o installation manager em TUI:
+Point at a different config file entirely:
 
-```bash
-task integrations:tui
+```sh
+YGGDRASIL_CONFIG=/etc/yggdrasil/ci.yaml yggdrasil apply -f workflow.yaml
 ```
 
-Também dá para usar a CLI diretamente:
+Full reference:
+[docs/cli.md](https://github.com/dakasa-yggdrasil/yggdrasil-core/blob/main/docs/cli.md).
 
-```bash
-./scripts/yggdrasil.sh integrations list
-./scripts/yggdrasil.sh integrations install rabbitmq
-```
+## Shell completion
 
-Se você quiser forçar instalação a partir de repositórios locais durante desenvolvimento, isso agora é opt-in explícito:
+> Completion scripts are on the roadmap. For now, `yggdrasil help` prints
+> the full command tree.
 
-```bash
-export YGGDRASIL_SURFACES_DEV_DIR=/caminho/para/repos-de-surfaces
-export YGGDRASIL_INTEGRATIONS_DEV_DIR=/caminho/para/repos-de-integrations
-```
+## Contributing
 
-Sem essas variáveis, o installation manager sempre usa os repositórios remotos do catálogo.
+This CLI is the primary touchpoint adopters have with Yggdrasil, so PRs
+that improve ergonomics, error messages, or integration coverage are
+especially welcome.
 
-No monorepo, cada integration publica um `docker-compose.yml` compatível com o stack raiz.
-Quando você roda um plugin isoladamente no próprio repositório, o `Taskfile` dele combina essa base com `docker-compose.standalone.yml`.
+- Run the test suite: `go test ./...`
+- Build locally: `go build -o yggdrasil ./cmd/yggdrasil`
+- Try a release snapshot: `goreleaser release --snapshot --clean --skip=publish`
 
-Inicialize os arquivos `.env`:
+## License
 
-```bash
-task env:init
-```
+Apache 2.0 — see [LICENSE](LICENSE).
 
-Suba o stack completo:
+---
 
-```bash
-task up
-```
+<div align="center">
 
-Importe os bootstrap manifests do core:
+Part of the [Yggdrasil](https://github.com/dakasa-yggdrasil/yggdrasil-core) project · [Report an issue](https://github.com/dakasa-yggdrasil/yggdrasil/issues)
 
-```bash
-task bootstrap:core
-```
-
-Rode o smoke end-to-end do produto:
-
-```bash
-task smoke
-task heimdall:smoke
-task heimdall:activate:llm
-task heimdall:verify:llm
-task install:smoke
-```
-
-`task install:smoke` valida um workspace isolado com as surfaces de referência,
-instala todo o catálogo remoto de integrations, valida o compose agregado, sobe
-um subconjunto representativo de runtime dentro do monorepo e fecha com o smoke
-end-to-end de `core + auth + console`, incluindo leituras e escritas mínimas
-pela entrada `/api` do console.
-
-`task heimdall:smoke` valida a rota operacional do Heimdall sem tocar GitHub
-real: ele sobe um mock de API GitHub na rede Docker, reconfigura temporariamente
-o `github-caller`, força um caso de incident escalation e outro de postmortem,
-e confirma que o core despacha `incident-escalation.yml` e `postmortem.yml` com
-os inputs corretos. Se `integration-github` não estiver instalada no monorepo,
-o smoke sobe um runtime temporário a partir do catálogo remoto só para essa
-validação.
-
-`task heimdall:activate:llm` ativa o fallback bounded `GPT + Claude` no
-`global/heimdall-guardian` e deixa as chaves materializadas como
-`managed_secret` no core. A ativação operacional está documentada em
-[`docs/heimdall-llm-activation.md`](/Users/dakasa/projects/yggdrasil/docs/heimdall-llm-activation.md).
-
-## Dogfooding workflows
-
-The product repo now ships two reference GitHub Actions workflows:
-
-- [`.github/workflows/emit-deploy-event.yml`](/Users/dakasa/projects/yggdrasil/.github/workflows/emit-deploy-event.yml)
-- [`.github/workflows/deploy.yml`](/Users/dakasa/projects/yggdrasil/.github/workflows/deploy.yml)
-
-`emit-deploy-event.yml` now delegates the HTTP call to the official GitHub
-Action [`dakasa-yggdrasil/action-emit-workflow-run`](https://github.com/dakasa-yggdrasil/action-emit-workflow-run).
-
-The intended flow is:
-
-1. a commit lands on `main`
-2. `emit-deploy-event.yml` posts one workflow run request into `yggdrasil-core`
-3. the bootstrap core workflow `global/ecosystem-repository-commit` dispatches this repository's `deploy.yml` through the global GitHub integration
-4. `deploy.yml` performs the repository-local validation/build/deploy work
-
-Repository configuration:
-
-- `YGGDRASIL_CORE_BASE_URL` secret: required for commit event emission
-- `YGGDRASIL_WORKFLOW_RUN_TOKEN` secret: optional shared token for `/api/v1/workflow-runs`
-- `YGGDRASIL_WORKFLOW_NAMESPACE` variable: optional, defaults to `global`
-- `YGGDRASIL_WORKFLOW_NAME` variable: optional, defaults to `ecosystem-repository-commit`
-- `YGGDRASIL_DEPLOY_WORKFLOW` variable: optional, defaults to `deploy.yml`
-- `YGGDRASIL_COMPONENT_KIND` variable: optional, defaults to `product` in this repository
-- `YGGDRASIL_COMPONENT_NAME` variable: optional, defaults to the repository name
-- `YGGDRASIL_DEPLOY_ENVIRONMENT` variable: optional, defaults to `production`
-
-For the exact repository-by-repository checklist used across the official org,
-see [`docs/github-dogfooding-checklist.md`](/Users/dakasa/projects/yggdrasil/docs/github-dogfooding-checklist.md).
-
-Valide também os artefatos de produção:
-
-```bash
-task build:images
-```
-
-Abra o console:
-
-```bash
-task open:console
-```
-
-## Operação por slice
-
-Você também pode trabalhar por serviço:
-
-```bash
-cd services/yggdrasil-core && task up
-cd surfaces/yggdrasil-auth-surface && task up
-cd surfaces/yggdrasil-console && task up
-```
-
-E, se uma integration estiver instalada:
-
-```bash
-cd integrations/integration-github && task up
-```
-
-Cada slice sobe só o que precisa, mas reaproveita a mesma infraestrutura compartilhada.
-
-As surfaces de referência do produto são repositórios separados. Se uma empresa
-quiser, ela pode:
-
-- substituir `yggdrasil-auth-surface`
-- substituir `yggdrasil-console`
-- adicionar APIs nichadas próprias por domínio
-
-Desde que essas surfaces continuem falando com o [`yggdrasil-core`](/Users/dakasa/projects/yggdrasil/services/yggdrasil-core).
-
-Para criar uma nova surface própria, o caminho preferencial agora é começar por
-[`surface-template`](https://github.com/dakasa-yggdrasil/surface-template) e
-depois instalar esse repositório no workspace.
-
-O catálogo [`catalog/surfaces.active`](/Users/dakasa/projects/yggdrasil/catalog/surfaces.active)
-define o runtime oficial que sobe com `task up`.
-
-O ponto de arquitetura importante é este: mesmo quando uma surface precisar acionar plugins,
-ela faz isso através do core. O vínculo de integrations continua sempre sendo `core <-> integration`.
-
-Para detalhes de fluxo local, variáveis e convenções, veja
-[`docs/local-development.md`](/Users/dakasa/projects/yggdrasil/docs/local-development.md).
-Para os guardrails de runtime e o checklist de produção, veja
-[`docs/production-readiness.md`](/Users/dakasa/projects/yggdrasil/docs/production-readiness.md).
-
-## Boas práticas adotadas
-
-- infraestrutura comum separada do runtime dos serviços
-- compose em camadas, para evitar copiar broker e banco em todo lugar
-- `.env.example` no root e por serviço
-- `task up` por slice em vez de subir todos os serviços de cada arquivo por acidente
-- `task down` por slice sem derrubar broker, banco e peers
-- integrations fora do monorepo por padrão, instaladas como submodules quando necessário
-- guardrails automáticos para evitar imports diretos entre microsserviços
-- only-core-by-default: o único runtime central obrigatório é o `yggdrasil-core`
-- portas e nomes de serviço estáveis
-- banco local enxuto para o produto atual, sem seed obrigatório de surfaces legadas
-- `Taskfile` local para `up`, `down`, `logs`, `ps`, `shell` e `test`
-- smoke end-to-end versionado no próprio repo, reutilizável localmente e em CI
-
-Para a regra arquitetural do produto, veja
-[`docs/architecture/product-repo.md`](/Users/dakasa/projects/yggdrasil/docs/architecture/product-repo.md).
+</div>
