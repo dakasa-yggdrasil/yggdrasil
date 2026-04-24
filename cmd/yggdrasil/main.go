@@ -68,6 +68,11 @@ func main() {
 			exitErr(err)
 		}
 		return
+	case "new":
+		if err := runNew(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -295,6 +300,10 @@ Auth & providers:
 
 Integration catalog:
   yggdrasil install <repo_ref>                       quickstart-install an integration
+
+Build your own:
+  yggdrasil new integration <name> --owner <org>     scaffold a new integration from the official template
+  yggdrasil new surface <name> --owner <org>         scaffold a new UI / edge surface
 
 Workspace dev (for contributors):
   yggdrasil integrations <subcommand>

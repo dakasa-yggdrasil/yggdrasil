@@ -106,6 +106,16 @@ A more thorough walk-through lives in the core repo's
 |---|---|
 | `yggdrasil install <repo_ref>` | Install an integration from a Github repo that carries a `yggdrasil-quickstart.yaml`. Interactive TUI for required inputs; `--non-interactive` and `--input k=v` for CI. |
 
+### Build your own plugin
+
+| Command | What it does |
+|---|---|
+| `yggdrasil new integration <name> [--owner <org>]` | Scaffold a new integration adapter from the official template. Shallow-clones, renames the Go module, inits a fresh git repo. `go test ./...` passes on the spot. |
+| `yggdrasil new surface <name> [--owner <org>]` | Same for surfaces (UI/auth edges). |
+
+Full walkthrough:
+[extending.md](https://github.com/dakasa-yggdrasil/yggdrasil-core/blob/main/docs/extending.md).
+
 ### Auth providers (OAuth/OIDC)
 
 | Command | What it does |
