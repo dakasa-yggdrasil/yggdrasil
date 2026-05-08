@@ -78,6 +78,11 @@ func main() {
 			exitErr(err)
 		}
 		return
+	case "collaborator":
+		if err := runCollaborator(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -301,6 +306,9 @@ Manifest operations (require an active context):
 
 Control plane deployment:
   yggdrasil deploy control-plane -f cp.yaml          apply a control_plane manifest and run the deploy workflow
+
+Collaborators (workforce lifecycle):
+  yggdrasil collaborator <verb> [opts]               see "yggdrasil collaborator help" for full verb list
 
 Auth & providers:
   yggdrasil auth provider list                       list configured OAuth/OIDC providers
