@@ -6,26 +6,59 @@ on:
       - main
       - "codex/**"
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  product:
+  cli:
+    name: CLI tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Task
+        uses: arduino/setup-task@v2
+
+      - name: Verify toolchain
+        run: task --version
+
+      - name: Check architecture boundaries
+        run: task arch:check
+
+      - name: Run unit tests
+        run: go test ./...
+
+  product:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_PAT_SUBMODULES: ${{ secrets.GH_PAT_SUBMODULES }}
+
+    steps:
+      - name: Configure private GitHub checkout
+        if: ${{ env.GH_PAT_SUBMODULES != '' }}
+        run: git config --global url."https://${GH_PAT_SUBMODULES}@github.com/".insteadOf "https://github.com/"
+
+      - name: Check out repository
+        uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ env.GH_PAT_SUBMODULES || github.token }}
 
       - name: Set up Task
         uses: arduino/setup-task@v2
 
       - name: Verify toolchain
         run: task doctor
-
-      - name: Check architecture boundaries
-        run: task arch:check
 
       - name: Validate compose configuration
         run: task config
@@ -47,10 +80,17 @@ jobs:
         run: task down
 
   installation-manager:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      GH_PAT_SUBMODULES: ${{ secrets.GH_PAT_SUBMODULES }}
 
     steps:
+      - name: Configure private GitHub checkout
+        if: ${{ env.GH_PAT_SUBMODULES != '' }}
+        run: git config --global url."https://${GH_PAT_SUBMODULES}@github.com/".insteadOf "https://github.com/"
+
       - name: Check out repository
         uses: actions/checkout@v4
 

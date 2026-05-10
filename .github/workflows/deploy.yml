@@ -108,11 +108,6 @@ on:
         required: false
         default: ""
         type: string
-      remediation_bundle_creation_reason_comment:
-        description: Optional remediation bundle creation reason comment.
-        required: false
-        default: ""
-        type: string
       remediation_bundle_approval_status:
         description: Optional remediation bundle approval status.
         required: false
@@ -123,11 +118,6 @@ on:
         required: false
         default: ""
         type: string
-      remediation_bundle_approval_comment:
-        description: Optional remediation bundle approval comment.
-        required: false
-        default: ""
-        type: string
       remediation_bundle_promotion_status:
         description: Optional remediation bundle promotion status.
         required: false
@@ -135,11 +125,6 @@ on:
         type: string
       remediation_bundle_promotion_summary:
         description: Optional remediation bundle promotion summary.
-        required: false
-        default: ""
-        type: string
-      remediation_bundle_promotion_comment:
-        description: Optional remediation bundle promotion comment.
         required: false
         default: ""
         type: string
@@ -156,6 +141,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
+          token: ${{ secrets.GH_PAT_SUBMODULES || secrets.GITHUB_TOKEN }}
           submodules: recursive
 
       - name: Set up Task
@@ -200,16 +186,16 @@ jobs:
           - Summary: ${{ inputs.remediation_bundle_summary || 'n/a' }}
           EOF
 
-            if [ -n "${{ inputs.remediation_bundle_creation_reason_summary }}" ] || [ -n "${{ inputs.remediation_bundle_creation_reason_comment }}" ]; then
-              echo "- Creation reason: ${{ inputs.remediation_bundle_creation_reason_summary || 'n/a' }}${{ inputs.remediation_bundle_creation_reason_comment && format(' · {0}', inputs.remediation_bundle_creation_reason_comment) || '' }}" >> "$GITHUB_STEP_SUMMARY"
+            if [ -n "${{ inputs.remediation_bundle_creation_reason_summary }}" ]; then
+              echo "- Creation reason: ${{ inputs.remediation_bundle_creation_reason_summary }}" >> "$GITHUB_STEP_SUMMARY"
             fi
 
             if [ -n "${{ inputs.remediation_bundle_approval_status }}" ] || [ -n "${{ inputs.remediation_bundle_approval_summary }}" ]; then
-              echo "- Approval decision: ${{ inputs.remediation_bundle_approval_status || 'n/a' }}${{ inputs.remediation_bundle_approval_summary && format(' · {0}', inputs.remediation_bundle_approval_summary) || '' }}${{ inputs.remediation_bundle_approval_comment && format(' · {0}', inputs.remediation_bundle_approval_comment) || '' }}" >> "$GITHUB_STEP_SUMMARY"
+              echo "- Approval decision: ${{ inputs.remediation_bundle_approval_status || 'n/a' }}${{ inputs.remediation_bundle_approval_summary && format(' · {0}', inputs.remediation_bundle_approval_summary) || '' }}" >> "$GITHUB_STEP_SUMMARY"
             fi
 
             if [ -n "${{ inputs.remediation_bundle_promotion_status }}" ] || [ -n "${{ inputs.remediation_bundle_promotion_summary }}" ]; then
-              echo "- Promotion review: ${{ inputs.remediation_bundle_promotion_status || 'n/a' }}${{ inputs.remediation_bundle_promotion_summary && format(' · {0}', inputs.remediation_bundle_promotion_summary) || '' }}${{ inputs.remediation_bundle_promotion_comment && format(' · {0}', inputs.remediation_bundle_promotion_comment) || '' }}" >> "$GITHUB_STEP_SUMMARY"
+              echo "- Promotion review: ${{ inputs.remediation_bundle_promotion_status || 'n/a' }}${{ inputs.remediation_bundle_promotion_summary && format(' · {0}', inputs.remediation_bundle_promotion_summary) || '' }}" >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
 

@@ -27,16 +27,12 @@ permissions:
 
 jobs:
   emit:
+    if: vars.YGGDRASIL_DEPLOY_EMIT_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
-      - name: Skip when Yggdrasil core is not configured
-        if: ${{ secrets.YGGDRASIL_CORE_BASE_URL == '' }}
-        run: echo "Skipping deploy event emission because YGGDRASIL_CORE_BASE_URL is not configured."
-
       - name: Emit deploy event into yggdrasil-core
-        if: ${{ secrets.YGGDRASIL_CORE_BASE_URL != '' }}
         uses: dakasa-yggdrasil/action-emit-workflow-run@v1
         with:
           core_base_url: ${{ secrets.YGGDRASIL_CORE_BASE_URL }}

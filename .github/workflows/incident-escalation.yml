@@ -93,11 +93,6 @@ on:
         required: false
         default: ""
         type: string
-      remediation_bundle_creation_reason_comment:
-        description: Optional remediation bundle creation reason comment.
-        required: false
-        default: ""
-        type: string
       remediation_bundle_approval_status:
         description: Optional remediation bundle approval status.
         required: false
@@ -108,11 +103,6 @@ on:
         required: false
         default: ""
         type: string
-      remediation_bundle_approval_comment:
-        description: Optional remediation bundle approval comment.
-        required: false
-        default: ""
-        type: string
       remediation_bundle_promotion_status:
         description: Optional remediation bundle promotion status.
         required: false
@@ -120,11 +110,6 @@ on:
         type: string
       remediation_bundle_promotion_summary:
         description: Optional remediation bundle promotion summary.
-        required: false
-        default: ""
-        type: string
-      remediation_bundle_promotion_comment:
-        description: Optional remediation bundle promotion comment.
         required: false
         default: ""
         type: string
@@ -142,11 +127,6 @@ on:
         description: Optional source commit SHA.
         required: false
         default: ""
-        type: string
-      postmortem_required:
-        description: Whether Heimdall already considers a postmortem required.
-        required: false
-        default: "false"
         type: string
 
 permissions:
@@ -181,17 +161,13 @@ jobs:
           REMEDIATION_BUNDLE_SUMMARY: ${{ inputs.remediation_bundle_summary }}
           REMEDIATION_BUNDLE_CONTEXT: ${{ inputs.remediation_bundle_context }}
           REMEDIATION_BUNDLE_CREATION_REASON_SUMMARY: ${{ inputs.remediation_bundle_creation_reason_summary }}
-          REMEDIATION_BUNDLE_CREATION_REASON_COMMENT: ${{ inputs.remediation_bundle_creation_reason_comment }}
           REMEDIATION_BUNDLE_APPROVAL_STATUS: ${{ inputs.remediation_bundle_approval_status }}
           REMEDIATION_BUNDLE_APPROVAL_SUMMARY: ${{ inputs.remediation_bundle_approval_summary }}
-          REMEDIATION_BUNDLE_APPROVAL_COMMENT: ${{ inputs.remediation_bundle_approval_comment }}
           REMEDIATION_BUNDLE_PROMOTION_STATUS: ${{ inputs.remediation_bundle_promotion_status }}
           REMEDIATION_BUNDLE_PROMOTION_SUMMARY: ${{ inputs.remediation_bundle_promotion_summary }}
-          REMEDIATION_BUNDLE_PROMOTION_COMMENT: ${{ inputs.remediation_bundle_promotion_comment }}
           SOURCE_RUN_URL: ${{ inputs.source_run_url }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           COMMIT_SHA: ${{ inputs.commit_sha }}
-          POSTMORTEM_REQUIRED: ${{ inputs.postmortem_required }}
         with:
           script: |
             function parseBundleContext(input) {
@@ -235,7 +211,6 @@ jobs:
               `- Remediation reason: ${process.env.REMEDIATION_REASON || 'n/a'}`,
               `- Source run ID: \`${process.env.SOURCE_RUN_ID || 'n/a'}\``,
               `- Source SHA: \`${process.env.COMMIT_SHA || 'n/a'}\``,
-              `- Postmortem required: \`${process.env.POSTMORTEM_REQUIRED || 'false'}\``,
             ];
             if (process.env.SOURCE_RUN_URL) {
               summaryLines.push(`- Source run URL: ${process.env.SOURCE_RUN_URL}`);
@@ -250,19 +225,16 @@ jobs:
               }
               const creationLine = reasonLine('Creation reason', bundleContext?.creation_reason || {
                 summary: process.env.REMEDIATION_BUNDLE_CREATION_REASON_SUMMARY,
-                comment: process.env.REMEDIATION_BUNDLE_CREATION_REASON_COMMENT,
               });
               if (creationLine) summaryLines.push(creationLine);
               const approvalLine = reasonLine('Approval decision', bundleContext?.approval_decision || {
                 status: process.env.REMEDIATION_BUNDLE_APPROVAL_STATUS,
                 summary: process.env.REMEDIATION_BUNDLE_APPROVAL_SUMMARY,
-                comment: process.env.REMEDIATION_BUNDLE_APPROVAL_COMMENT,
               });
               if (approvalLine) summaryLines.push(approvalLine);
               const promotionLine = reasonLine('Promotion review', bundleContext?.promotion_review || {
                 status: process.env.REMEDIATION_BUNDLE_PROMOTION_STATUS,
                 summary: process.env.REMEDIATION_BUNDLE_PROMOTION_SUMMARY,
-                comment: process.env.REMEDIATION_BUNDLE_PROMOTION_COMMENT,
               });
               if (promotionLine) summaryLines.push(promotionLine);
             }

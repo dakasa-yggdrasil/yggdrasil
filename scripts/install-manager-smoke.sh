@@ -197,13 +197,13 @@ PY
 )
 
 echo "Installing reference surfaces from remote repositories..."
-./scripts/ygg.sh surfaces install yggdrasil-auth-surface >/dev/null
-./scripts/ygg.sh surfaces install yggdrasil-console >/dev/null
+./scripts/yggdrasil.sh surfaces install yggdrasil-auth-surface >/dev/null
+./scripts/yggdrasil.sh surfaces install yggdrasil-console >/dev/null
 
 echo "Installing all catalog integrations from remote repositories..."
 for entry in "${catalog_integrations[@]}"; do
   IFS='|' read -r slug _ _ <<<"$entry"
-  ./scripts/ygg.sh integrations install "$slug" >/dev/null
+  ./scripts/yggdrasil.sh integrations install "$slug" >/dev/null
 done
 
 task env:init >/dev/null
