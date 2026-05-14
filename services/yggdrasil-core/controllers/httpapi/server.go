@@ -171,6 +171,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/collaborators", server.handleCollaboratorCreate)
 	mux.HandleFunc("GET /api/v1/teams", server.handleTeamList)
 	mux.HandleFunc("POST /api/v1/teams", server.handleTeamCreate)
+	mux.HandleFunc("PATCH /api/v1/teams/{id}", server.handleTeamUpdate)
 	mux.HandleFunc("GET /api/v1/team-memberships", server.handleTeamMembershipList)
 	mux.HandleFunc("POST /api/v1/team-memberships", server.handleTeamMembershipUpsert)
 	mux.HandleFunc("GET /api/v1/products", server.handleProductList)
@@ -209,6 +210,7 @@ func New(serviceName string, db *sql.DB, conn *amqp.Connection, logger *zap.Logg
 	mux.HandleFunc("POST /api/v1/console/collaborators", server.handleCollaboratorCreate)
 	mux.HandleFunc("GET /api/v1/console/teams", server.handleTeamList)
 	mux.HandleFunc("POST /api/v1/console/teams", server.handleTeamCreate)
+	mux.HandleFunc("PATCH /api/v1/console/teams/{id}", server.handleTeamUpdate)
 	mux.HandleFunc("GET /api/v1/console/team-memberships", server.handleTeamMembershipList)
 	mux.HandleFunc("POST /api/v1/console/team-memberships", server.handleTeamMembershipUpsert)
 	mux.HandleFunc("GET /api/v1/console/auth/third-party-identities", server.handleThirdPartyIdentityList)
@@ -625,6 +627,23 @@ func (s *Server) handleTeamCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{"team": team})
+}
+
+func (s *Server) handleTeamUpdate(w http.ResponseWriter, r *http.Request) {
+	var req model.UpdateTeamRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeMappedError(w, err)
+		return
+	}
+	req.ID = r.PathValue("id")
+
+	team, err := repository.UpdateTeam(r.Context(), s.db, req)
+	if err != nil {
+		writeMappedError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"team": team})
 }
 
 func (s *Server) handleTeamMembershipList(w http.ResponseWriter, r *http.Request) {
