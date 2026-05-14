@@ -4,3 +4,6 @@
 [submodule "surfaces/yggdrasil-console"]
 	path = surfaces/yggdrasil-console
 	url = https://github.com/dakasa-yggdrasil/surface-console.git
+[submodule "services/yggdrasil-core"]
+	path = services/yggdrasil-core
+	url = https://github.com/dakasa-yggdrasil/yggdrasil-core.git
