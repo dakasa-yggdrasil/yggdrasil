@@ -123,23 +123,62 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 	return nil
 }
 
-// Login exchanges credentials for a session token. Returns the token
-// plus the collaborator slug (convenient to persist in Context).
-func (c *Client) Login(ctx context.Context, identifier, password string) (string, string, error) {
+// LoginResult is the outcome of a password login. Either Token is set
+// (auth complete) or MFARequired is true (the core accepted the password
+// but needs a second factor — re-submit with a TOTP or recovery code).
+type LoginResult struct {
+	Token            string
+	CollaboratorSlug string
+	MFARequired      bool
+	Factors          []string
+}
+
+// LoginMFA exchanges credentials (plus an optional second factor) for a
+// session token. The core's /api/v1/auth/login completes MFA in a single
+// round-trip: pass totpCode or recoveryCode and a valid one yields a
+// token. When the password is correct but no factor is supplied, the core
+// returns 202 {error: mfa_required, factors}, surfaced here as
+// MFARequired=true so the caller can prompt and retry.
+func (c *Client) LoginMFA(ctx context.Context, identifier, password, totpCode, recoveryCode string) (LoginResult, error) {
 	req := map[string]any{"identifier": identifier, "password": password}
+	if totpCode != "" {
+		req["totp_code"] = totpCode
+	}
+	if recoveryCode != "" {
+		req["recovery_code"] = recoveryCode
+	}
 	var resp struct {
 		Token        string `json:"token"`
 		Collaborator struct {
 			Slug string `json:"slug"`
 		} `json:"collaborator"`
+		Error   string   `json:"error"`
+		Factors []string `json:"factors"`
 	}
 	if err := c.Do(ctx, http.MethodPost, "/api/v1/auth/login", req, &resp); err != nil {
+		return LoginResult{}, err
+	}
+	if resp.Token != "" {
+		return LoginResult{Token: resp.Token, CollaboratorSlug: resp.Collaborator.Slug}, nil
+	}
+	if resp.Error == "mfa_required" {
+		return LoginResult{MFARequired: true, Factors: resp.Factors}, nil
+	}
+	return LoginResult{}, fmt.Errorf("server did not return a session token")
+}
+
+// Login is the simple (token, slug) shape kept for callers that never hit
+// MFA (e.g. the init-bootstrap admin). It errors clearly if the account
+// turns out to require a second factor.
+func (c *Client) Login(ctx context.Context, identifier, password string) (string, string, error) {
+	res, err := c.LoginMFA(ctx, identifier, password, "", "")
+	if err != nil {
 		return "", "", err
 	}
-	if resp.Token == "" {
-		return "", "", fmt.Errorf("server did not return a session token")
+	if res.MFARequired {
+		return "", "", fmt.Errorf("MFA required (factors: %s) — use `yggdrasil login --totp <code>` or `--recovery-code <code>`", strings.Join(res.Factors, ", "))
 	}
-	return resp.Token, resp.Collaborator.Slug, nil
+	return res.Token, res.CollaboratorSlug, nil
 }
 
 // Healthz returns nil when the server is ready to accept traffic.

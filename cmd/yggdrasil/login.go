@@ -21,13 +21,20 @@ func runLogin(args []string) error {
 	server := fs.String("server", "", "yggdrasil-core base URL (e.g. http://localhost:9080)")
 	username := fs.String("username", "", "login identifier (collaborator slug)")
 	password := fs.String("password", "", "password (omit to prompt interactively)")
+	totp := fs.String("totp", "", "TOTP/authenticator code (for MFA-enabled accounts)")
+	recovery := fs.String("recovery-code", "", "MFA recovery code (alternative to --totp)")
 	contextName := fs.String("context", "", "context name (default: derived from host)")
 	nonInteractive := fs.Bool("non-interactive", false, "fail instead of prompting for missing values")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `yggdrasil login — exchange credentials for a session token
 
 Usage:
-  yggdrasil login --server <url> --username <slug> [--password <value>]
+  yggdrasil login --server <url> --username <slug|email> [--password <value>]
+  yggdrasil login --server <url> --username <email> --totp <code>   # MFA accounts
+
+The username matches the collaborator's email (case-insensitive) or slug.
+For MFA-enabled accounts, pass --totp <code> (or --recovery-code <code>); in
+an interactive terminal you'll be prompted for the code automatically.
 
 Flags:
 `)
@@ -70,10 +77,27 @@ Flags:
 
 	client := corecli.NewClient(*server, "")
 	ctx := context.Background()
-	token, slug, err := client.Login(ctx, *username, *password)
+	res, err := client.LoginMFA(ctx, *username, *password, *totp, *recovery)
 	if err != nil {
 		return err
 	}
+	if res.MFARequired {
+		if *nonInteractive {
+			return fmt.Errorf("MFA required (factors: %s) — re-run with --totp <code> or --recovery-code <code>", strings.Join(res.Factors, ", "))
+		}
+		code := ""
+		if err := huh.NewInput().Title("Authenticator code (TOTP)").Value(&code).Run(); err != nil {
+			return err
+		}
+		res, err = client.LoginMFA(ctx, *username, *password, strings.TrimSpace(code), "")
+		if err != nil {
+			return err
+		}
+		if res.MFARequired {
+			return fmt.Errorf("MFA code rejected — login not completed")
+		}
+	}
+	token, slug := res.Token, res.CollaboratorSlug
 
 	cfg, path, err := corecli.Load()
 	if err != nil {
