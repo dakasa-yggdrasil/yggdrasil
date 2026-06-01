@@ -110,6 +110,13 @@ func dispatch() {
 			exitErr(err)
 		}
 		return
+	case "install":
+		// Adopter-facing: installs a catalogued integration onto a remote
+		// yggdrasil-core. Must NOT require a monorepo checkout (findRoot).
+		if err := runInstall(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
 	case "deploy":
 		if err := runDeploy(os.Args[2:]); err != nil {
 			exitErr(err)
@@ -144,10 +151,6 @@ func dispatch() {
 		}
 	case "surfaces":
 		if err := runSurfaces(surfaceManager, os.Args[2:]); err != nil {
-			exitErr(err)
-		}
-	case "install":
-		if err := runInstall(os.Args[2:]); err != nil {
 			exitErr(err)
 		}
 	default:
