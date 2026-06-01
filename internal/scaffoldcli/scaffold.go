@@ -117,6 +117,14 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return result, err
 	}
 
+	// Born install-able: rewrite the quickstart's own template stubs
+	// (metadata.name/provider id/family/your-org image owner) so the new
+	// integration doesn't ship a `template` quickstart that `yggdrasil
+	// install` would register as a bogus instance. No-op for surfaces.
+	if err := customizeQuickstart(absDir, opts.Name, opts.GitHubOwner); err != nil {
+		return result, err
+	}
+
 	if !opts.SkipGitInit {
 		if err := runIn(ctx, absDir, "git", "init", "-q"); err != nil {
 			return result, fmt.Errorf("git init: %w", err)
@@ -220,6 +228,46 @@ func buildRewrites(kind Kind, name, module string) []rewrite {
 		{templateModule, module},
 		{templateProject, newProject},
 	}
+}
+
+// customizeQuickstart rewrites the integration_quickstart's own template
+// placeholders so a freshly scaffolded integration is born with a real,
+// install-able quickstart instead of the `template` stub. The tree-wide
+// rewrite has already turned integration-template into integration-<name>,
+// so only the quickstart-specific stubs remain. No-op when the file is
+// absent (surfaces don't ship one).
+//
+// Replacements are value-anchored ("name: template", not bare "template")
+// so the K8s Deployment podspec `template:` key, step ids, and templated
+// `{{ inputs.* }}` values are never touched.
+func customizeQuickstart(dir, name, owner string) error {
+	path := filepath.Join(dir, "yggdrasil-quickstart.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read quickstart: %w", err)
+	}
+	if owner == "" {
+		owner = "your-org"
+	}
+	reps := []rewrite{
+		{"name: template", "name: " + name},
+		{"family: template", "family: " + name},
+		{"id: default", "id: " + name},
+		{`"TODO: display name"`, name},
+		{`"TODO: provider label"`, name},
+		{"your-org", owner},
+	}
+	content := string(raw)
+	for _, r := range reps {
+		content = strings.ReplaceAll(content, r.from, r.to)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write quickstart: %w", err)
+	}
+	return nil
 }
 
 type rewrite struct {
