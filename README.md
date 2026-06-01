@@ -79,8 +79,8 @@ Archives are named `yggdrasil_<version>_<os>_<arch>.tar.gz` (Windows ships a
 `.zip`). For example:
 
 ```sh
-VERSION=1.0.0      # the release you want
-OS=Darwin          # Darwin | Linux | Windows
+VERSION=0.1.0      # the release you want
+OS=darwin          # darwin | linux | windows  (matches goreleaser output)
 ARCH=arm64         # amd64 | arm64
 curl -L -o yggdrasil.tar.gz \
   "https://github.com/dakasa-yggdrasil/yggdrasil/releases/download/v${VERSION}/yggdrasil_${VERSION}_${OS}_${ARCH}.tar.gz"
