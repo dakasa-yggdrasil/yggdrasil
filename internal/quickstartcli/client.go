@@ -42,6 +42,41 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
+// csrfHeader is the request header the core's CSRF middleware checks on
+// state-changing requests (matches yggdrasil-core's csrfHeaderName).
+const csrfHeader = "X-CSRF-Token"
+
+// fetchCSRFToken reads the per-session csrf_token from /api/v1/auth/session.
+// Best-effort: any error (no session, token-only auth, offline) returns ""
+// and the caller proceeds without the header.
+func (c *Client) fetchCSRFToken(ctx context.Context) string {
+	if c.Token == "" || c.BaseURL == "" {
+		return ""
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/v1/auth/session", nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return ""
+	}
+	var env struct {
+		Authenticated bool   `json:"authenticated"`
+		CSRFToken     string `json:"csrf_token"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&env) != nil {
+		return ""
+	}
+	return env.CSRFToken
+}
+
 // NewClient returns a Client with sensible defaults (60s timeout).
 func NewClient(baseURL, token string) *Client {
 	return &Client{
@@ -74,6 +109,13 @@ func (c *Client) Install(ctx context.Context, req InstallRequest) (InstallRespon
 	httpReq.Header.Set("Accept", "application/json")
 	if c.Token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.Token)
+		// install is a state-changing POST; when authed with a session
+		// token the core enforces CSRF. Echo the per-session csrf_token
+		// (best-effort) so a logged-in user isn't 403'd. Token-authed
+		// callers without a session simply get "" and pass anyway.
+		if csrf := c.fetchCSRFToken(ctx); csrf != "" {
+			httpReq.Header.Set(csrfHeader, csrf)
+		}
 	}
 
 	resp, err := c.HTTPClient.Do(httpReq)

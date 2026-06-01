@@ -115,15 +115,12 @@ Flags:
 		}
 	}
 
-	// For OCI refs, pass the already-fetched bytes inline so the
-	// server doesn't need to re-authenticate to the registry. For
-	// GitHub refs the server can fetch via raw.githubusercontent
-	// without extra auth — cleaner audit trail when the server does
-	// the fetch itself.
-	var inlineManifest []byte
-	if ref.OCI != nil {
-		inlineManifest = raw
-	}
+	// Pass the manifest the CLI already fetched, inline. For OCI this
+	// avoids re-authenticating to the registry; for GitHub it makes
+	// PRIVATE repos work — the server's own raw.githubusercontent fetch is
+	// unauthenticated and 404s on private repos. The server validates the
+	// bytes either way, so inlining is both robust and cheaper.
+	inlineManifest := raw
 
 	client := quickstartcli.NewClient(coreURL, coreToken)
 	resp, err := client.Install(ctx, quickstartcli.InstallRequest{
