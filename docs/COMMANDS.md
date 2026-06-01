@@ -26,6 +26,7 @@ server + token from `~/.yggdrasil/config.yaml` (see
 | [`config`](#config) | `kubectl`-style management of `~/.yggdrasil/config.yaml` contexts |
 | [`status`](#status) | Show the active context + a server health check |
 | [`version`](#version) | Print the CLI version |
+| [`update`](#update) | Self-update a release binary to the latest GitHub release |
 | [`apply`](#apply) | Create a new manifest version from a file (or preview with `--dry-run`) |
 | [`get`](#get) | List or fetch manifests |
 | [`describe`](#describe) | Print one manifest as YAML |
@@ -167,6 +168,73 @@ yggdrasil version          # also: yggdrasil --version
 Prints `yggdrasil <version> (<short-sha>)`. Release binaries embed the tag via
 ldflags; source builds report `dev` plus the VCS revision when available. Takes
 no flags.
+
+---
+
+## `update`
+
+Self-update a release binary to the latest published GitHub release.
+
+```
+yggdrasil update          # download, verify, and replace this binary in place
+yggdrasil update --check  # only report whether a newer release exists
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--check` | `false` | Report whether a newer release is available and exit without installing. |
+
+Takes no `--server` / `--token` flags — it talks to GitHub, not your control
+plane. What it does:
+
+1. Queries the [GitHub releases API](https://api.github.com/repos/dakasa-yggdrasil/yggdrasil/releases/latest)
+   for the latest release tag (`releases/latest`). The repo is public, so no
+   token is needed.
+2. If the running binary is already current it prints
+   `yggdrasil <version> is already the latest (<tag>)` and exits. A `dev`
+   (source) build is never "behind" — it just reports the latest tag.
+3. Otherwise downloads the matching asset for your OS/arch
+   (`yggdrasil_<version>_<os>_<arch>.tar.gz`), fetches `checksums.txt` from the
+   same release, and verifies the asset's **sha256** against the goreleaser
+   checksum line. A mismatch aborts the update. (If `checksums.txt` is missing
+   it warns and proceeds without verification.)
+4. Extracts the `yggdrasil` binary and **atomically** replaces the running
+   executable (writes a sibling temp file and renames over the current path,
+   which works on Unix even while running).
+
+```console
+$ yggdrasil update
+updating yggdrasil 0.1.0 → v0.2.1
+downloading yggdrasil_0.2.1_darwin_arm64.tar.gz ...
+✓ updated to v0.2.1
+```
+
+**Permissions.** The replace step needs write access to the directory the binary
+lives in. If you installed to `/usr/local/bin`, run `sudo yggdrasil update` —
+otherwise the rename fails with a `cannot replace … (try: sudo yggdrasil update)`
+hint.
+
+**Windows.** Self-update is **not supported on Windows yet**: the command stops
+and directs you to download the `.zip` asset from the
+[releases page](https://github.com/dakasa-yggdrasil/yggdrasil/releases) manually.
+
+### Automatic update suggestion
+
+Independently of this command, **after any** `yggdrasil` invocation the CLI
+checks GitHub for the latest release — at most **once per 24h** — and, if the
+running binary is behind, prints a one-line nudge to **stderr**:
+
+```
+→ A new yggdrasil release is available: 0.1.0 → v0.2.1
+  Update with: yggdrasil update
+```
+
+The last check time and discovered version are cached in
+`~/.yggdrasil/config.yaml` under `update_check` (see
+[CONFIGURATION.md](CONFIGURATION.md)), so the API is hit at most daily. The
+check is **best-effort**: any failure (offline, no config, GitHub error) is
+silent and never changes the exit code, and `dev` (source) builds are never
+nagged. The nudge is suppressed during `yggdrasil update` itself.
 
 ---
 

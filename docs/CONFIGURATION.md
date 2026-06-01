@@ -22,6 +22,9 @@ contexts:
     server: https://yggdrasil.example.com
     token: <session-token>
     collaborator: ops-bot
+update_check:
+  last_checked_unix: 1717200000
+  latest_version: v0.2.1
 ```
 
 ### Fields
@@ -33,6 +36,19 @@ contexts:
 | `contexts.<name>.server` | context | Base URL of the `yggdrasil-core` (e.g. `http://localhost:9080`). |
 | `contexts.<name>.token` | context | Bearer session token. **Secret.** Sent as `Authorization: Bearer`. |
 | `contexts.<name>.collaborator` | context | Login slug for the saved session (informational; shown by `status`). |
+| `update_check` | top-level | Cache for the automatic release check (see below). Managed by the CLI; safe to delete. |
+| `update_check.last_checked_unix` | update_check | Unix timestamp of the last GitHub release check, used to throttle to once per 24h. |
+| `update_check.latest_version` | update_check | Latest release tag seen at that check (e.g. `v0.2.1`). |
+
+### Automatic update check
+
+After any command, the CLI checks GitHub for a newer release **at most once per
+24h** and caches the result in `update_check`. When the running binary is behind
+the cached `latest_version`, it prints a one-line nudge to stderr suggesting
+`yggdrasil update`. The check is best-effort and silent on failure; `dev`
+(source) builds are never nagged. See [`update`](COMMANDS.md#update) for the
+self-update command and the full behavior. This block is written automatically —
+you never need to edit it, and deleting it just forces a fresh check.
 
 ### File location & permissions
 

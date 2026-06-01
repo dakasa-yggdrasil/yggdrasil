@@ -60,7 +60,7 @@ A `kubectl`-shaped command tree. Full flag reference in
 
 | Group | Commands |
 |---|---|
-| **Bootstrap & connection** | `init` · `login` · `status` · `version` · `config <verb>` |
+| **Bootstrap & connection** | `init` · `login` · `status` · `version` · `update` · `config <verb>` |
 | **Manifest operations** | `apply` (incl. `--dry-run`) · `get` · `describe` · `diff` · `delete` · `rollback` |
 | **Workflow runs** | `run` · `ops list\|get\|retry\|abort\|replay` · `logs` |
 | **Control-plane deploy** | `deploy control-plane` |
@@ -98,6 +98,23 @@ go install github.com/dakasa-yggdrasil/yggdrasil/cmd/yggdrasil@latest
 
 Requires Go 1.25+. A source build reports its version as `dev` plus the VCS
 revision; tagged release binaries report the real semver.
+
+### Staying up to date
+
+A release binary can update itself in place:
+
+```sh
+yggdrasil update          # download + verify + replace this binary
+yggdrasil update --check  # just report whether a newer release exists
+```
+
+`update` pulls the latest GitHub release asset for your OS/arch, verifies its
+goreleaser checksum, and atomically swaps the running binary. It needs write
+access to the install dir — use `sudo yggdrasil update` if it lives in
+`/usr/local/bin`. Self-update is **not yet supported on Windows** (it points you
+at the releases page instead). After any command the CLI also checks GitHub at
+most once a day and prints a one-line nudge to stderr when you're behind — see
+[docs/COMMANDS.md](docs/COMMANDS.md#update) for details.
 
 ## Quick start
 
