@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -15,14 +16,23 @@ import (
 // positional argument picks the kind; everything else goes to
 // scaffoldcli.Options.
 func runNew(args []string) error {
+	// Manifest-template kinds (workflow/policy/role/…) emit a starter YAML
+	// instead of cloning a repo. They are handled before the scaffold path
+	// and don't require a <name> (defaults to "example").
+	if len(args) >= 1 && isManifestTemplateKind(args[0]) {
+		return runNewManifest(args[0], args[1:])
+	}
 	if len(args) < 2 {
-		fmt.Println(`yggdrasil new — scaffold a new Yggdrasil plugin from an official template
+		fmt.Printf(`yggdrasil new — scaffold a new Yggdrasil plugin or manifest
 
 Usage:
   yggdrasil new integration <name> [flags]      scaffold a new integration adapter
   yggdrasil new surface <name> [flags]          scaffold a new UI / edge surface
+  yggdrasil new <kind> [name] [-o file]         emit a starter manifest YAML
+                                                (%s)
 
-Flags:
+Flags:`, strings.Join(manifestTemplateKinds(), ", "))
+		fmt.Println(`
   --module <path>       Go module path (default: github.com/<owner>/<kind>-<name>)
   --owner <org>         GitHub owner for default module + install hint
   --dir <path>          target directory (default: ./<kind>-<name>)
