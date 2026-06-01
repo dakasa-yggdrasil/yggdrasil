@@ -28,6 +28,7 @@ func runApply(args []string) error {
 	file := fs.String("f", "", "path to a manifest file (use '-' for stdin)")
 	server := fs.String("server", "", "override the active context's server URL")
 	token := fs.String("token", "", "override the active context's bearer token")
+	dryRun := fs.Bool("dry-run", false, "show the diff vs the active version without applying")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `yggdrasil apply — create a new manifest version from a file
 
@@ -72,6 +73,23 @@ Flags:
 		kind, payload, err := extractKindAndPayload(doc)
 		if err != nil {
 			return err
+		}
+		if *dryRun {
+			name, _ := payload["name"].(string)
+			namespace, _ := payload["namespace"].(string)
+			d, isNew, derr := diffManifest(ctx, client, kind, namespace, name, payload["spec"])
+			if derr != nil {
+				return derr
+			}
+			switch {
+			case isNew:
+				fmt.Printf("+ %s %s/%s (new — would be created)\n", kind, namespace, name)
+			case d == "":
+				fmt.Printf("= %s %s/%s (no changes)\n", kind, namespace, name)
+			default:
+				fmt.Printf("~ %s %s/%s (dry-run, not applied)\n%s\n", kind, namespace, name, d)
+			}
+			continue
 		}
 		created, err := client.CreateManifest(ctx, kind, payload)
 		if err != nil {

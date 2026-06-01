@@ -98,6 +98,11 @@ func main() {
 			exitErr(err)
 		}
 		return
+	case "diff":
+		if err := runDiff(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
 	case "deploy":
 		if err := runDeploy(os.Args[2:]); err != nil {
 			exitErr(err)
@@ -322,11 +327,20 @@ Bootstrap & connection:
   yggdrasil login --server <url> --username <slug>   exchange credentials for a session token
   yggdrasil status                                   show active context + health
   yggdrasil version                                  print CLI version
+  yggdrasil config use-context <name>                switch the active server context
 
 Manifest operations (require an active context):
-  yggdrasil apply -f <file>                          create a new manifest version from YAML/JSON
+  yggdrasil apply -f <file> [--dry-run]              create a new manifest version (or preview the diff)
   yggdrasil get <kind> [<name>]                      list or fetch manifests
   yggdrasil describe <kind> <name>                   print one manifest as YAML
+  yggdrasil diff -f <file>                           diff a file against the active version
+  yggdrasil delete <kind> <name> [--soft]            remove a manifest (hard by default)
+  yggdrasil rollback <kind> <name> --to <ver>        re-apply an older version as a new one
+
+Workflow runs:
+  yggdrasil run <workflow> [--input k=v] [--async]   dispatch a workflow run
+  yggdrasil ops list                                 list workflow runs
+  yggdrasil ops get|retry|abort|replay <run-id>      inspect or manage a run
   yggdrasil logs <run-id>                            stream a workflow run
 
 Control plane deployment:
