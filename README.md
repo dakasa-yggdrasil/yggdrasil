@@ -2,47 +2,89 @@
 
 # `yggdrasil`
 
-**Official CLI for the [Yggdrasil](https://github.com/dakasa-yggdrasil/yggdrasil-core) control plane**
+**The official CLI for the [Yggdrasil](https://github.com/dakasa-yggdrasil/yggdrasil-core) control plane**
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-1.25-00ADD8.svg)](go.mod)
 [![Release](https://img.shields.io/github/v/release/dakasa-yggdrasil/yggdrasil?include_prereleases&sort=semver)](https://github.com/dakasa-yggdrasil/yggdrasil/releases)
 
-*One command bootstrap. kubectl-style manifest operations. Integration catalog installs in one line.*
+*One-command bootstrap · `kubectl`-style manifest ops · one-line integration installs*
 
-[Install](#install) · [Commands](#commands) · [Docs](https://github.com/dakasa-yggdrasil/yggdrasil-core/tree/main/docs)
+[Usage](docs/USAGE.md) · [Commands](docs/COMMANDS.md) · [Configuration](docs/CONFIGURATION.md) · [Development](docs/DEVELOPMENT.md)
 
 </div>
 
 ---
 
-## What it does
+## What it is
 
 `yggdrasil` is the terminal interface to a self-hosted
-[Yggdrasil control plane](https://github.com/dakasa-yggdrasil/yggdrasil-core).
-Think of it as `kubectl` for workflows, integrations, and the rest of the
-Yggdrasil manifest catalog — plus a one-command bootstrap that brings up the
-entire stack on a fresh host.
+[Yggdrasil control plane](https://github.com/dakasa-yggdrasil/yggdrasil-core) —
+the **self-hosted control plane for declarative workflows + integrations over
+your whole stack**. Think *Backstage, but more complete and scalable*: an
+orchestration engine + versioned manifest catalog + RBAC/policy + OAuth/OIDC +
+a pluggable integration ecosystem. You write YAML; Yggdrasil persists, runs, and
+audits it.
 
-```sh
-yggdrasil init                                                # Boot Postgres + RabbitMQ + core + admin in one command
-yggdrasil install dakasa-yggdrasil/integration-kubernetes     # Install an integration from the catalog
-yggdrasil apply -f my-workflow.yaml                           # Apply any manifest (YAML or JSON)
-yggdrasil get workflow -n prod                                # List manifests (table / yaml / json)
-yggdrasil logs <run-id>                                       # Stream a workflow run's step results
+This CLI is the front door. It speaks the same HTTP API the web console does,
+so everything you can do in the UI you can do (and script) from a terminal:
+bootstrap a fresh stack, apply manifests, install integrations, run workflows,
+manage collaborators, and stream a run to completion.
+
+> **Where business logic lives.** This repo builds only the CLI binary. All
+> authority — schema validation, workflow execution, RBAC — lives in
+> [`yggdrasil-core`](https://github.com/dakasa-yggdrasil/yggdrasil-core). The CLI
+> is intentionally thin: it shapes HTTP calls and renders responses.
+
+## Where it fits
+
+```mermaid
+flowchart LR
+  user["operator / CI"] -->|"yggdrasil apply / get / logs"| cli["yggdrasil CLI"]
+  cli -->|"HTTP /api/v1 (Bearer token)"| core["yggdrasil-core<br/>HTTP API"]
+  core -->|"transport (HTTP / AMQP)"| adapters["integration adapters"]
+  adapters --> backends["real backends<br/>(k8s, Postgres, SaaS, ...)"]
+  cli -.->|"docker compose up (init)"| stack["standalone stack<br/>Postgres + core + adapters"]
+  stack --- core
 ```
+
+The CLI never talks to a backend directly. It POSTs declarative manifests to
+`yggdrasil-core`, which compiles workflows and dispatches them to integration
+adapters over a transport (HTTP by default, AMQP opt-in). See
+[docs/USAGE.md](docs/USAGE.md) for the full walk-through.
+
+## Commands
+
+A `kubectl`-shaped command tree. Full flag reference in
+[docs/COMMANDS.md](docs/COMMANDS.md).
+
+| Group | Commands |
+|---|---|
+| **Bootstrap & connection** | `init` · `login` · `status` · `version` |
+| **Manifest operations** | `apply` · `get` · `describe` · `logs` |
+| **Control-plane deploy** | `deploy control-plane` |
+| **Integration catalog** | `install` (GitHub & `oci://` refs) |
+| **Auth providers** | `auth provider list\|get\|apply\|delete` |
+| **Collaborators** | `collaborator <verb>` (lifecycle, teams, absence, audit) |
+| **Scaffolding** | `new integration` · `new surface` |
+| **Workspace dev** (contributors) | `integrations …` · `surfaces …` |
 
 ## Install
 
 ### From release (recommended)
 
-Grab a prebuilt binary for your OS/arch from the
-[latest release](https://github.com/dakasa-yggdrasil/yggdrasil/releases/latest),
-then:
+Grab a prebuilt archive for your OS/arch from the
+[latest release](https://github.com/dakasa-yggdrasil/yggdrasil/releases/latest).
+Archives are named `yggdrasil_<version>_<os>_<arch>.tar.gz` (Windows ships a
+`.zip`). For example:
 
 ```sh
-# macOS (Apple Silicon example)
-curl -L https://github.com/dakasa-yggdrasil/yggdrasil/releases/latest/download/yggdrasil_$(uname -s)_$(uname -m).tar.gz | tar xz
+VERSION=1.0.0      # the release you want
+OS=Darwin          # Darwin | Linux | Windows
+ARCH=arm64         # amd64 | arm64
+curl -L -o yggdrasil.tar.gz \
+  "https://github.com/dakasa-yggdrasil/yggdrasil/releases/download/v${VERSION}/yggdrasil_${VERSION}_${OS}_${ARCH}.tar.gz"
+tar xzf yggdrasil.tar.gz
 sudo mv yggdrasil /usr/local/bin/
 yggdrasil version
 ```
@@ -53,135 +95,81 @@ yggdrasil version
 go install github.com/dakasa-yggdrasil/yggdrasil/cmd/yggdrasil@latest
 ```
 
-### Via Homebrew / Scoop
-
-> Package manager taps are on the roadmap. Track
-> [issue #N](https://github.com/dakasa-yggdrasil/yggdrasil/issues) for progress.
+Requires Go 1.25+. A source build reports its version as `dev` plus the VCS
+revision; tagged release binaries report the real semver.
 
 ## Quick start
 
 ```sh
-# Boot a fresh self-hosted stack on this machine (needs Docker or colima)
+# 1. Boot a full self-hosted stack on this machine (needs Docker + compose v2).
+#    Brings up Postgres + yggdrasil-core + the kubernetes and schema-migrations
+#    adapters, seeds a first admin, and saves a "local" context.
 yggdrasil init
 
-# See what you've got
+# 2. Confirm everything is up.
 yggdrasil status
 
-# Install the Kubernetes integration so workflows can apply K8s manifests
+# 3. Install an integration from a GitHub repo that ships a quickstart manifest.
 yggdrasil install dakasa-yggdrasil/integration-kubernetes --provider kubernetes
 
-# Apply a workflow you wrote
+# 4. Apply a workflow (or any manifest) you wrote.
 yggdrasil apply -f my-workflow.yaml
 
-# Watch it run
+# 5. Run it and stream the steps to completion.
 yggdrasil logs <run-id>
 ```
 
-A more thorough walk-through lives in the core repo's
-[getting-started guide](https://github.com/dakasa-yggdrasil/yggdrasil-core/blob/main/docs/getting-started.md).
-
-## Commands
-
-### Bootstrap and connection
-
-| Command | What it does |
-|---|---|
-| `yggdrasil init` | Bring up a full self-hosted stack via docker-compose (Postgres + RabbitMQ + core + seeded admin + catalog). Use `--server <url>` to attach to an existing yggdrasil-core instead. |
-| `yggdrasil login --server <url> --username <slug>` | Exchange credentials for a session token and save a named context to `~/.yggdrasil/config.yaml`. |
-| `yggdrasil status` | Print the active context + a health check against the server. |
-| `yggdrasil version` | Print the CLI version (and commit SHA if built from source). |
-
-### Manifest operations
-
-| Command | What it does |
-|---|---|
-| `yggdrasil apply -f <file>` | Create a new version of any manifest kind. YAML or JSON. Use `-` for stdin. |
-| `yggdrasil get <kind> [<name>]` | List (or fetch one) manifests. Supports `-n <namespace>` and `-o table\|yaml\|json`. |
-| `yggdrasil describe <kind> <name>` | Full YAML dump of one manifest. |
-| `yggdrasil logs <run-id>` | Stream a workflow run's step transitions until terminal. |
-
-### Integration catalog
-
-| Command | What it does |
-|---|---|
-| `yggdrasil install <repo_ref>` | Install an integration from a Github repo that carries a `yggdrasil-quickstart.yaml`. Interactive TUI for required inputs; `--non-interactive` and `--input k=v` for CI. |
-
-### Build your own plugin
-
-| Command | What it does |
-|---|---|
-| `yggdrasil new integration <name> [--owner <org>]` | Scaffold a new integration adapter from the official template. Shallow-clones, renames the Go module, inits a fresh git repo. `go test ./...` passes on the spot. |
-| `yggdrasil new surface <name> [--owner <org>]` | Same for surfaces (UI/auth edges). |
-
-Full walkthrough:
-[extending.md](https://github.com/dakasa-yggdrasil/yggdrasil-core/blob/main/docs/extending.md).
-
-### Auth providers (OAuth/OIDC)
-
-| Command | What it does |
-|---|---|
-| `yggdrasil auth provider list` | List configured OAuth/OIDC providers. |
-| `yggdrasil auth provider apply -f <file>` | Register or update a provider (see [auth-providers/](https://github.com/dakasa-yggdrasil/yggdrasil-core/tree/main/docs/auth-providers) for GitHub + Google templates). |
-| `yggdrasil auth provider get <name>` | Fetch one provider's config. |
-| `yggdrasil auth provider delete <name>` | Remove a provider. |
-
-### Contributor helpers (monorepo dev)
-
-The following commands only work when run from a checkout of the Yggdrasil
-monorepo and are intended for contributors — not adopters:
-
-| Command | What it does |
-|---|---|
-| `yggdrasil integrations list|install|tui|installed` | Clone an integration repo into the local workspace for dev. |
-| `yggdrasil surfaces list|install|scaffold|activate` | Manage UI surfaces in the local workspace. |
+The full end-to-end journey — install → init → login → apply → get → logs — is
+in [docs/USAGE.md](docs/USAGE.md).
 
 ## Configuration
 
-Config lives at `~/.yggdrasil/config.yaml` (kubectl-style multi-context).
-Structure:
+State lives in `~/.yggdrasil/config.yaml`, a `kubectl`-style multi-context file
+written by `init` and `login`:
 
 ```yaml
 current_context: local
 contexts:
   local:
     server: http://localhost:9080
-    token: ys_...
+    token: <session-token>
     collaborator: admin
   prod:
     server: https://yggdrasil.example.com
-    token: ys_...
+    token: <session-token>
     collaborator: ops-bot
 ```
 
-Switch contexts for one command without editing the file:
+Switch context or point at a different file per-command, without editing it:
 
 ```sh
 YGGDRASIL_CONTEXT=prod yggdrasil get workflow
-```
-
-Point at a different config file entirely:
-
-```sh
 YGGDRASIL_CONFIG=/etc/yggdrasil/ci.yaml yggdrasil apply -f workflow.yaml
 ```
 
-Full reference:
-[docs/cli.md](https://github.com/dakasa-yggdrasil/yggdrasil-core/blob/main/docs/cli.md).
+Every field, every env var (`YGGDRASIL_CONTEXT`, `YGGDRASIL_CONFIG`,
+`YGGDRASIL_URL`, `YGGDRASIL_GITHUB_TOKEN`, …) is documented in
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## Shell completion
+## Development
 
-> Completion scripts are on the roadmap. For now, `yggdrasil help` prints
-> the full command tree.
+```sh
+go build -o yggdrasil ./cmd/yggdrasil        # build the CLI
+go test ./...                                # unit tests
+task arch:check                              # architecture-boundary check
+goreleaser release --snapshot --clean --skip=publish   # dry-run a release
+```
 
-## Contributing
+Repo layout, the submodule/monorepo split, CI, and the release flow are in
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-This CLI is the primary touchpoint adopters have with Yggdrasil, so PRs
-that improve ergonomics, error messages, or integration coverage are
-especially welcome.
+## Compatibility
 
-- Run the test suite: `go test ./...`
-- Build locally: `go build -o yggdrasil ./cmd/yggdrasil`
-- Try a release snapshot: `goreleaser release --snapshot --clean --skip=publish`
+The CLI is API-compatible with the `yggdrasil-core` minor version it ships
+against. It targets the `/api/v1` surface of
+[`yggdrasil-core`](https://github.com/dakasa-yggdrasil/yggdrasil-core) and the
+quickstart-manifest contract of
+[`integration-template`](https://github.com/dakasa-yggdrasil/integration-template).
 
 ## License
 
