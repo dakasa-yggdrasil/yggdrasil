@@ -93,6 +93,11 @@ func main() {
 			exitErr(err)
 		}
 		return
+	case "rollback":
+		if err := runRollback(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
 	case "deploy":
 		if err := runDeploy(os.Args[2:]); err != nil {
 			exitErr(err)
