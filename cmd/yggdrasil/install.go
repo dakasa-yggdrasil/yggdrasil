@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/dakasa-yggdrasil/yggdrasil/internal/corecli"
 	"github.com/dakasa-yggdrasil/yggdrasil/internal/quickstartcli"
 )
 
@@ -68,6 +69,13 @@ Flags:
 		return err
 	}
 
+	// Resolve the core target up front (fail fast, before the GitHub fetch
+	// and the TUI) — explicit flags/env win, else the active context.
+	coreURL, coreToken, err := installCoreTarget(*server, *token)
+	if err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	doc, raw, err := quickstartcli.FetchManifest(ctx, ref)
 	if err != nil {
@@ -117,7 +125,7 @@ Flags:
 		inlineManifest = raw
 	}
 
-	client := quickstartcli.NewClient(*server, *token)
+	client := quickstartcli.NewClient(coreURL, coreToken)
 	resp, err := client.Install(ctx, quickstartcli.InstallRequest{
 		RepoRef:        ref.String(),
 		ManifestInline: inlineManifest,
@@ -131,6 +139,20 @@ Flags:
 
 	quickstartcli.PrintResult(resp, *dryRun)
 	return nil
+}
+
+// installCoreTarget resolves the yggdrasil-core URL + token for the install
+// request. Explicit --server/--token (or $YGGDRASIL_URL /
+// $YGGDRASIL_WORKFLOW_RUN_TOKEN, wired as the flag defaults) win; otherwise
+// it falls back to the active context in ~/.yggdrasil/config.yaml — the same
+// resolution get/apply/deploy use — so a logged-in user can
+// `yggdrasil install <repo>` without repeating --server or hitting a 401.
+func installCoreTarget(serverFlag, tokenFlag string) (baseURL, token string, err error) {
+	core, err := corecli.FromContext(serverFlag, tokenFlag)
+	if err != nil {
+		return "", "", err
+	}
+	return core.BaseURL, core.Token, nil
 }
 
 // parseSeedFlags turns ["region=us-east-1","tier=standard"] into a map.
