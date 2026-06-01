@@ -83,6 +83,11 @@ func main() {
 			exitErr(err)
 		}
 		return
+	case "ops":
+		if err := runOps(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
 	case "deploy":
 		if err := runDeploy(os.Args[2:]); err != nil {
 			exitErr(err)
