@@ -88,6 +88,11 @@ func main() {
 			exitErr(err)
 		}
 		return
+	case "config":
+		if err := runConfig(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
 	case "deploy":
 		if err := runDeploy(os.Args[2:]); err != nil {
 			exitErr(err)
