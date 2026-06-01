@@ -211,8 +211,11 @@ type WorkflowRunStep struct {
 }
 
 // WorkflowRunResult is the full response of POST /api/v1/workflow-runs.
+// RunID is only populated by the async dispatch path (202 + {run_id,
+// status}); the synchronous path returns the full Steps instead.
 type WorkflowRunResult struct {
 	Workflow map[string]any    `json:"workflow"`
+	RunID    string            `json:"run_id,omitempty"`
 	Status   string            `json:"status"`
 	Steps    []WorkflowRunStep `json:"steps"`
 	Metadata map[string]any    `json:"metadata,omitempty"`
