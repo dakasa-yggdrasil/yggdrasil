@@ -26,8 +26,16 @@ const ConfigFileName = "config.yaml"
 // yggdrasil-core and authenticate. Multi-context support (dev, staging,
 // prod against the same laptop) is modeled after kubectl.
 type Config struct {
-	CurrentContext string               `json:"current_context,omitempty"`
-	Contexts       map[string]*Context  `json:"contexts,omitempty"`
+	CurrentContext string              `json:"current_context,omitempty"`
+	Contexts       map[string]*Context `json:"contexts,omitempty"`
+	UpdateCheck    *UpdateCheckState   `json:"update_check,omitempty"`
+}
+
+// UpdateCheckState caches the throttled update check so the CLI hits the
+// GitHub API at most once per UpdateCheckInterval.
+type UpdateCheckState struct {
+	LastCheckedUnix int64  `json:"last_checked_unix,omitempty"`
+	LatestVersion   string `json:"latest_version,omitempty"`
 }
 
 // Context is one named (server + credentials) pair.

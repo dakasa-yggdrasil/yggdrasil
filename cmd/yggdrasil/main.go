@@ -12,7 +12,9 @@ import (
 	"github.com/dakasa-yggdrasil/yggdrasil/internal/surfaces"
 )
 
-func main() {
+// dispatch routes the command. main() wraps it to add the throttled
+// "new release available" nudge after the command runs.
+func dispatch() {
 	if len(os.Args) < 2 {
 		printUsage()
 		return
@@ -60,6 +62,11 @@ func main() {
 		return
 	case "version", "--version":
 		if err := runVersion(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
+		return
+	case "update":
+		if err := runUpdate(os.Args[2:]); err != nil {
 			exitErr(err)
 		}
 		return
@@ -327,6 +334,7 @@ Bootstrap & connection:
   yggdrasil login --server <url> --username <slug>   exchange credentials for a session token
   yggdrasil status                                   show active context + health
   yggdrasil version                                  print CLI version
+  yggdrasil update                                   download & install the latest release
   yggdrasil config use-context <name>                switch the active server context
 
 Manifest operations (require an active context):
