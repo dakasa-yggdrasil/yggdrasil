@@ -23,17 +23,23 @@ server + token from `~/.yggdrasil/config.yaml` (see
 |---|---|
 | [`init`](#init) | Bootstrap a self-hosted stack, or attach to an existing core |
 | [`login`](#login) | Exchange credentials for a session token; save a context |
+| [`config`](#config) | `kubectl`-style management of `~/.yggdrasil/config.yaml` contexts |
 | [`status`](#status) | Show the active context + a server health check |
 | [`version`](#version) | Print the CLI version |
-| [`apply`](#apply) | Create a new manifest version from a file |
+| [`apply`](#apply) | Create a new manifest version from a file (or preview with `--dry-run`) |
 | [`get`](#get) | List or fetch manifests |
 | [`describe`](#describe) | Print one manifest as YAML |
+| [`diff`](#diff) | Client-side diff of a manifest file vs the active version |
+| [`delete`](#delete) | Remove a manifest (hard by default, `--soft` keeps history) |
+| [`rollback`](#rollback) | Re-apply an older manifest version as a new version |
+| [`run`](#run) | Dispatch a workflow run by name (sync, or `--async`) |
+| [`ops`](#ops) | Inspect and manage workflow runs (list / get / retry / abort / replay) |
 | [`logs`](#logs) | Stream a workflow run's steps |
 | [`deploy`](#deploy) | Apply a control_plane manifest + run the deploy workflow |
 | [`install`](#install) | Quickstart-install an integration (GitHub / OCI) |
 | [`auth`](#auth) | Manage OAuth/OIDC providers |
 | [`collaborator`](#collaborator) | Workforce lifecycle |
-| [`new`](#new) | Scaffold an integration or surface from a template |
+| [`new`](#new) | Scaffold an integration/surface, or emit a starter manifest YAML |
 | [`integrations`](#integrations-workspace-dev) | Workspace-dev: manage integration submodules |
 | [`surfaces`](#surfaces-workspace-dev) | Workspace-dev: manage surface submodules |
 
@@ -92,6 +98,49 @@ unless `--non-interactive` is set, in which case they are required.
 
 ---
 
+## `config`
+
+`kubectl`-style management of the multi-context file at
+`~/.yggdrasil/config.yaml` (or `$YGGDRASIL_CONFIG`) — so you can switch servers
+without hand-editing YAML. Purely local: `config` never calls the server.
+
+```
+yggdrasil config get-contexts
+yggdrasil config current-context
+yggdrasil config use-context <name>
+yggdrasil config set-context <name> [--server url] [--token t] [--collaborator slug]
+yggdrasil config delete-context <name>
+yggdrasil config view
+```
+
+| Subcommand | Description |
+|---|---|
+| `get-contexts` | List context names + server URLs; the current one is marked `*`. |
+| `current-context` | Print the active context name (errors if none is set). |
+| `use-context <name>` | Make `<name>` the current context (must already exist). |
+| `set-context <name>` | Create or update a context. Flags merge onto any existing one, so a partial update (e.g. only `--token`) preserves the rest. |
+| `delete-context <name>` | Remove a context; clears `current-context` if it pointed there. |
+| `view` | Print the resolved file path, current context, and every context. Tokens are shown as `REDACTED`. |
+
+`set-context` flags:
+
+| Flag | Description |
+|---|---|
+| `--server <url>` | Server URL for this context. |
+| `--token <bearer>` | Bearer token for this context. |
+| `--collaborator <slug>` | Collaborator slug recorded with the context. |
+
+```sh
+yggdrasil config set-context prod \
+  --server https://yggdrasil.example.com --token "$TOKEN" --collaborator ops-bot
+yggdrasil config use-context prod
+yggdrasil config get-contexts
+# * prod   https://yggdrasil.example.com
+#   local  http://localhost:9080
+```
+
+---
+
 ## `status`
 
 Print the active context and probe `/healthz` + `/readyz` (5s timeout).
@@ -130,15 +179,24 @@ are applied in order. POSTs to `/api/v1/manifests?kind=<kind>`.
 ```
 yggdrasil apply -f my-workflow.yaml
 yggdrasil apply -f - < bundle.yaml
+yggdrasil apply -f my-workflow.yaml --dry-run    # preview the diff, change nothing
 ```
 
 | Flag | Default | Description |
 |---|---|---|
 | `-f <file>` | _(required)_ | Manifest file (YAML or JSON). Use `-` for stdin. |
+| `--dry-run` | `false` | Show the diff vs the active version per document and exit without applying. |
 | `--server <url>` | _(context)_ | Override the active context's server URL. |
 | `--token <bearer>` | _(context)_ | Override the active context's bearer token. |
 
 Prints `created <kind> <namespace>/<name> (version N)` per document.
+
+`--dry-run` is a **client-side** spec comparison (the same one [`diff`](#diff)
+performs) — the core has no server-side manifest validate/dry-run endpoint, so
+it reports how each document differs from the active version but cannot
+pre-validate schema. Per document it prints one of `+ … (new — would be
+created)`, `= … (no changes)`, or `~ … (dry-run, not applied)` followed by the
+diff.
 
 ---
 
@@ -178,6 +236,186 @@ yggdrasil describe <kind> <name> [-n <namespace>]
 | `-n`, `--namespace <ns>` | Namespace (required when ambiguous). |
 | `--server <url>` | Override the context server URL. |
 | `--token <bearer>` | Override the context bearer token. |
+
+---
+
+## `diff`
+
+Show how the desired manifest(s) in a file differ from the active versions on
+the server. This is a **client-side** spec comparison: the core has no
+server-side diff/validate for manifests, so `diff` fetches each manifest's
+active version (`GET /api/v1/manifests`) and compares specs locally. Multiple
+`---`-separated documents are diffed in order.
+
+```
+yggdrasil diff -f my-workflow.yaml
+yggdrasil diff -f - < bundle.yaml
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `-f <file>` | _(required)_ | Manifest file (YAML or JSON). Use `-` for stdin. |
+| `--server <url>` | _(context)_ | Override the active context's server URL. |
+| `--token <bearer>` | _(context)_ | Override the active context's bearer token. |
+
+Per document it prints one of:
+
+- `+ <kind> <ns>/<name> (new — no active version on server)`
+- `= <kind> <ns>/<name> (no changes)`
+- `~ <kind> <ns>/<name>` followed by a line diff (`-` removed, `+` added).
+
+Specs are normalised through JSON before comparison so cosmetic key ordering
+never shows up as a phantom diff. To preview a diff *and* apply in one step, use
+[`apply --dry-run`](#apply).
+
+---
+
+## `delete`
+
+Remove a manifest. The core deletes by manifest id, so the CLI first resolves
+`(kind, namespace, name)` → id via a list (`GET /api/v1/manifests`), then calls
+`DELETE /api/v1/manifests/{id}[?soft=true]`. **Hard by default** (mirrors the
+core), which removes the rows for the whole `(kind, namespace, name)` group.
+
+```
+yggdrasil delete <kind> <name> [-n <namespace>]   # hard-delete (default)
+yggdrasil delete <kind> <name> --soft             # keep history, flip active=false
+yggdrasil delete <kind> <name> --yes              # skip the confirmation prompt
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `-n`, `--namespace <ns>` | `global` | Manifest namespace. |
+| `--soft` | `false` | Soft-delete: flip `active=false` on every version and keep history, instead of hard-deleting. |
+| `--yes` | `false` | Skip the interactive confirmation prompt. |
+| `--server <url>` | _(context)_ | Override the active context's server URL. |
+| `--token <bearer>` | _(context)_ | Override the active context's bearer token. |
+
+Without `--yes` it prompts `hard-delete <kind> <ns>/<name>? … [y/N]` and aborts
+on anything but `y`/`yes`. If the manifest was already gone the server reports
+`already_absent` and the CLI prints `already absent: …` rather than erroring.
+
+---
+
+## `rollback`
+
+Re-apply an older manifest version's spec as a **new** version. The core has no
+rollback endpoint, so this is a **client-side** operation: the CLI lists every
+version (`GET /api/v1/manifests`), finds the target version's spec, and
+re-creates it (`POST /api/v1/manifests?kind=<kind>`). History is preserved — the
+rolled-back content lands as the newest version, and you can roll forward again.
+
+```
+yggdrasil rollback <kind> <name> --to <version> [-n <namespace>]
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--to <version>` | _(required)_ | Manifest version to roll back to (a positive integer). |
+| `-n`, `--namespace <ns>` | `global` | Manifest namespace. |
+| `--yes` | `false` | Skip the interactive confirmation prompt. |
+| `--server <url>` | _(context)_ | Override the active context's server URL. |
+| `--token <bearer>` | _(context)_ | Override the active context's bearer token. |
+
+Without `--yes` it prompts `roll back <kind> <ns>/<name> from vN to vM? …
+[y/N]`. On success it prints `✓ rolled back … to the contents of vM (new
+version K)`. Errors if `--to` names a version that doesn't exist (the message
+reports the latest version) or whose record carries no spec.
+
+---
+
+## `run`
+
+Dispatch a workflow run by name (`POST /api/v1/workflow-runs`). **Sync by
+default**: the CLI blocks (up to 30 minutes) and prints per-step progress, then
+exits non-zero unless the run reaches a success terminal (`succeeded` or
+`committed`). With `--async` the core returns a run id immediately
+(`POST /api/v1/workflow-runs?async=true`) for later follow-up via
+[`logs`](#logs) / [`ops get`](#ops).
+
+```
+yggdrasil run <workflow> [-n <ns>] [--input k=v ...]
+yggdrasil run <workflow> --async        # return a run id, don't block
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `-n`, `--namespace <ns>` | `global` | Workflow namespace. |
+| `--input <k=v>` | _(repeatable)_ | A workflow input as `key=value`. Values are sent as strings; the workflow's input schema coerces types server-side. |
+| `--async` | `false` | Dispatch asynchronously and print the run id immediately instead of streaming. |
+| `--server <url>` | _(context)_ | Override the active context's server URL. |
+| `--token <bearer>` | _(context)_ | Override the active context's bearer token. |
+
+```sh
+yggdrasil run deploy-app -n prod --input image=ghcr.io/acme/app:1.4.2 --input replicas=3
+yggdrasil run deploy-app --async
+# ✓ dispatched global/deploy-app (run <run-id>, status queued)
+#   follow: yggdrasil logs <run-id>   |   yggdrasil ops get <run-id>
+```
+
+---
+
+## `ops`
+
+Inspect and manage workflow runs — the operate-side view the core exposes under
+`/api/v1/ops/workflows`.
+
+```
+yggdrasil ops list [--status s ...] [--integration i] [--search q] [--limit N] [-o table|json]
+yggdrasil ops get <run-id> [-o yaml|json]
+yggdrasil ops retry <run-id> [--reason r]
+yggdrasil ops abort <run-id>
+yggdrasil ops replay <run-id>
+```
+
+### `ops list`
+
+Lists runs from `GET /api/v1/ops/workflows`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--status <s>` | _(all)_ | Filter by status. Repeatable to OR several statuses. |
+| `--integration <i>` | _(all)_ | Filter by integration. |
+| `--search <q>` | _(none)_ | Substring search over run / workflow. |
+| `--limit <N>` | `50` | Maximum rows to return. |
+| `-o <format>` | `table` | Output format: `table` \| `json`. |
+| `--server <url>` | _(context)_ | Override the active context's server URL. |
+| `--token <bearer>` | _(context)_ | Override the active context's bearer token. |
+
+Table columns: `RUN_ID  STATUS  WORKFLOW  INTEGRATION  TRIGGER`. When the page is
+truncated it prints a `next_cursor` hint so you can widen `--limit`.
+
+### `ops get`
+
+Fetch one run's full detail from `GET /api/v1/ops/workflows/{run-id}` (steps,
+inputs, outputs — rendered raw).
+
+| Flag | Default | Description |
+|---|---|---|
+| `-o <format>` | `yaml` | Output format: `yaml` \| `json`. |
+| `--server <url>` | _(context)_ | Override the active context's server URL. |
+| `--token <bearer>` | _(context)_ | Override the active context's bearer token. |
+
+### `ops retry` / `ops abort` / `ops replay`
+
+POST a lifecycle action against a run
+(`POST /api/v1/ops/workflows/{run-id}/{verb}`).
+
+| Flag | Default | Description |
+|---|---|---|
+| `--reason <r>` | _(empty)_ | Reason recorded in the audit trail. Only consumed by `retry`. |
+| `--server <url>` | _(context)_ | Override the active context's server URL. |
+| `--token <bearer>` | _(context)_ | Override the active context's bearer token. |
+
+When the action spawns a fresh run (e.g. `retry`/`replay`) the CLI prints
+`✓ <verb> <run-id> → new run <new-run-id>`; otherwise it prints
+`✓ <verb> <run-id> accepted`.
+
+```sh
+yggdrasil ops list --status failed --integration kubernetes --limit 20
+yggdrasil ops get <run-id> -o json
+yggdrasil ops retry <run-id> --reason "transient registry 503"
+```
 
 ---
 
@@ -341,6 +579,15 @@ Backed by `/api/v1/collaborators*` endpoints on the core.
 
 ## `new`
 
+`new` has two flavours, picked by the first positional:
+
+- **Repo scaffolds** — `new integration|surface <name>` clones an official
+  template into a fresh repo.
+- **Manifest starters** — `new <workflow|policy|role|product|auth_provider>
+  [name]` emits a starter manifest YAML to stdout (or a file).
+
+### Scaffold a plugin repo
+
 Scaffold a new plugin from an official template
 (`dakasa-yggdrasil/<kind>-template`). Shallow-clones, rewrites the module path +
 project name, strips template git history, and inits a fresh repo.
@@ -360,6 +607,32 @@ yggdrasil new surface <name> [flags]
 
 `<name>` must be lowercase kebab-case starting with a letter. Requires `git` on
 `PATH`. The scaffold compiles + tests cleanly on creation.
+
+### Emit a starter manifest
+
+When the first positional is a manifest kind, `new` renders a minimal, editable
+starter manifest for that kind instead of cloning a repo. No server call — it
+just writes YAML for you to edit and then [`apply`](#apply). Supported kinds:
+`workflow`, `policy`, `role`, `product`, `auth_provider`.
+
+```
+yggdrasil new <kind> [name] [-n <namespace>] [-o <file>]
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `-n`, `--namespace <ns>` | `default` | Namespace stamped into the starter manifest. |
+| `-o <file>` | _(stdout)_ | Write the starter to a file instead of stdout. |
+
+`[name]` is optional and defaults to `example`. With `-o` the CLI writes the
+file and prints the next step (`yggdrasil apply -f <file>`). The starters are
+deliberately minimal; the authoritative schema for each kind lives in
+`yggdrasil-core`.
+
+```sh
+yggdrasil new workflow my-pipeline -n prod        # print a starter to stdout
+yggdrasil new policy ops-writes -o policy.yaml    # write a file, then edit + apply
+```
 
 ---
 

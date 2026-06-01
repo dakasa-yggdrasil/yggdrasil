@@ -1,4 +1,4 @@
-# Usage — install → init → login → apply → get → logs
+# Usage — install → init → login → apply → get → run → ops/logs
 
 A copy-pasteable walk-through that takes you from an empty machine to a running
 workflow you can watch finish. Every command and flag here is verified against
@@ -234,12 +234,82 @@ ambiguous across namespaces:
 yggdrasil describe workflow hello -n default
 ```
 
+Before pushing a new version, you can preview exactly what would change against
+the active version on the server — a **client-side** spec diff (the core has no
+server-side validate/dry-run for manifests):
+
+```sh
+yggdrasil diff -f my-workflow.yaml          # ~ / = / + per document
+yggdrasil apply -f my-workflow.yaml --dry-run   # same diff, then exit without applying
+```
+
+To take a manifest back to an earlier version, `rollback` re-applies that
+version's spec as a brand-new version (history is preserved, so you can roll
+forward again):
+
+```sh
+yggdrasil rollback workflow hello --to 3 -n default
+```
+
+And to remove one, `delete` is **hard by default** (mirrors the core); `--soft`
+flips `active=false` and keeps history:
+
+```sh
+yggdrasil delete workflow hello -n default          # prompts; hard-delete
+yggdrasil delete workflow hello -n default --soft --yes
+```
+
 ---
 
-## 8. Run & stream — `yggdrasil logs`
+## 8. Dispatch a run — `yggdrasil run`
 
-After a workflow run is dispatched (e.g. by `install`, `deploy`, or the core
-UI), follow it by run id. `logs` polls the run endpoint and prints each step
+`run` dispatches a workflow by name (`POST /api/v1/workflow-runs`). It is
+**synchronous by default**: it blocks and prints per-step progress, exiting
+non-zero unless the run reaches a success terminal (`succeeded`/`committed`).
+Pass inputs with repeatable `--input k=v`.
+
+```sh
+yggdrasil run hello -n default --input target=prod
+```
+
+For fire-and-forget (e.g. a long run you'll follow elsewhere), `--async` returns
+a run id immediately and prints the follow-up commands:
+
+```sh
+yggdrasil run hello --async
+# ✓ dispatched global/hello (run <run-id>, status queued)
+#   follow: yggdrasil logs <run-id>   |   yggdrasil ops get <run-id>
+```
+
+---
+
+## 9. Inspect & manage runs — `yggdrasil ops`
+
+`ops` is the operate-side view of workflow runs (`/api/v1/ops/workflows`). List,
+inspect, and act on runs without leaving the terminal.
+
+```sh
+yggdrasil ops list                                   # recent runs (table)
+yggdrasil ops list --status failed --integration kubernetes --limit 20
+yggdrasil ops list --search hello -o json            # machine-readable
+
+yggdrasil ops get <run-id>                            # full detail as YAML
+yggdrasil ops get <run-id> -o json
+
+yggdrasil ops retry <run-id> --reason "transient registry 503"
+yggdrasil ops abort <run-id>
+yggdrasil ops replay <run-id>
+```
+
+`ops list` prints `RUN_ID  STATUS  WORKFLOW  INTEGRATION  TRIGGER`. When an
+action spawns a fresh run (`retry`/`replay`) the CLI prints the new run id.
+
+---
+
+## 10. Stream a run — `yggdrasil logs`
+
+When you already have a run id (from `run --async`, `install`, `deploy`, or the
+core UI), follow it by id. `logs` polls the run endpoint and prints each step
 transition until the run reaches a terminal state.
 
 ```sh
@@ -265,7 +335,7 @@ A `failed` run makes the command exit non-zero — friendly for CI gates.
 
 ---
 
-## 9. Deploy the control plane — `yggdrasil deploy`
+## 11. Deploy the control plane — `yggdrasil deploy`
 
 A convenience that applies a `control_plane` manifest and immediately dispatches
 the seeded `yggdrasil-deploy-control-plane` workflow against it, printing
@@ -282,7 +352,7 @@ inputs to the names the standalone `init` topology seeds. Override with
 
 ---
 
-## 10. Manage collaborators — `yggdrasil collaborator`
+## 12. Manage collaborators — `yggdrasil collaborator`
 
 Drive the workforce lifecycle from the CLI (create, offboard, suspend, team
 membership, absences, audit). Output is JSON, so it pipes cleanly into `jq`.
@@ -299,7 +369,7 @@ See [COMMANDS.md](COMMANDS.md#collaborator) for the full verb + flag matrix.
 
 ---
 
-## 11. Scaffold a plugin — `yggdrasil new`
+## 13. Scaffold a plugin — `yggdrasil new`
 
 ```sh
 yggdrasil new integration datadog --owner acme
@@ -311,6 +381,35 @@ This shallow-clones the official template
 module path + project name, strips the template's git history, and inits a fresh
 repo. `go test ./...` passes out of the box. See
 [DEVELOPMENT.md](DEVELOPMENT.md#scaffolding) for the rewrite rules.
+
+`new` also doubles as a manifest starter generator. Point it at a manifest kind
+(`workflow`, `policy`, `role`, `product`, `auth_provider`) and it emits a
+minimal, editable YAML instead of cloning a repo:
+
+```sh
+yggdrasil new workflow my-pipeline -n prod        # print a starter to stdout
+yggdrasil new policy ops-writes -o policy.yaml    # write a file, then edit + apply
+```
+
+---
+
+## 14. Switch servers — `yggdrasil config`
+
+State lives in `~/.yggdrasil/config.yaml` as a `kubectl`-style multi-context
+file. `config` manages it without hand-editing YAML — entirely local, no server
+call:
+
+```sh
+yggdrasil config set-context prod \
+  --server https://yggdrasil.example.com --token "$TOKEN" --collaborator ops-bot
+yggdrasil config use-context prod        # make prod current
+yggdrasil config get-contexts            # current one marked with *
+yggdrasil config view                    # full file, tokens REDACTED
+```
+
+`set-context` merges, so a partial update (e.g. only `--token` to refresh it)
+preserves the rest of the context. See
+[CONFIGURATION.md](CONFIGURATION.md) for every field and env var.
 
 ---
 

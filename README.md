@@ -60,13 +60,14 @@ A `kubectl`-shaped command tree. Full flag reference in
 
 | Group | Commands |
 |---|---|
-| **Bootstrap & connection** | `init` · `login` · `status` · `version` |
-| **Manifest operations** | `apply` · `get` · `describe` · `logs` |
+| **Bootstrap & connection** | `init` · `login` · `status` · `version` · `config <verb>` |
+| **Manifest operations** | `apply` (incl. `--dry-run`) · `get` · `describe` · `diff` · `delete` · `rollback` |
+| **Workflow runs** | `run` · `ops list\|get\|retry\|abort\|replay` · `logs` |
 | **Control-plane deploy** | `deploy control-plane` |
 | **Integration catalog** | `install` (GitHub & `oci://` refs) |
 | **Auth providers** | `auth provider list\|get\|apply\|delete` |
 | **Collaborators** | `collaborator <verb>` (lifecycle, teams, absence, audit) |
-| **Scaffolding** | `new integration` · `new surface` |
+| **Scaffolding** | `new integration` · `new surface` · `new <kind>` (starter manifest YAML) |
 | **Workspace dev** (contributors) | `integrations …` · `surfaces …` |
 
 ## Install
@@ -115,12 +116,12 @@ yggdrasil install dakasa-yggdrasil/integration-kubernetes --provider kubernetes
 # 4. Apply a workflow (or any manifest) you wrote.
 yggdrasil apply -f my-workflow.yaml
 
-# 5. Run it and stream the steps to completion.
-yggdrasil logs <run-id>
+# 5. Run it and stream the steps to completion (sync by default).
+yggdrasil run my-workflow -n default --input target=prod
 ```
 
-The full end-to-end journey — install → init → login → apply → get → logs — is
-in [docs/USAGE.md](docs/USAGE.md).
+The full end-to-end journey — install → init → login → apply → get → run → ops/logs —
+is in [docs/USAGE.md](docs/USAGE.md).
 
 ## Configuration
 
