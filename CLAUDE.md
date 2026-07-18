@@ -74,21 +74,6 @@ The CLI also ships `yggdrasil-quickstart.yaml` consumers, including OCI
 ref support (`oci://...`, commit `6da5dfe`) so adopters can install
 catalogued integrations by container ref.
 
-## Recent commits
-
-```
-6935994 chore: yggdrasil-core agora e submodule do repo standalone   ← submodule conversion 2026-05-14
-6b21245 feat(core): team_grants schema + API + bump console          ← submodule pointer bump
-abaa0a6 feat(core): DELETE /api/v1/teams/{id} + bump console
-b49e162 feat(core): PATCH /api/v1/teams/{id} for team updates + bump console
-2c1f760 chore(submodule): bump yggdrasil-console to 7deb6d6
-d434caf ci: make product smoke manual
-3a75803 chore(deps): refresh collaborator CLI dependencies
-6da5dfe ✨ yggdrasil install: OCI registry support via oci:// refs
-c18b78a ✨ yggdrasil init: bake integration adapters into the compose template
-f3435e3 📚 Make RabbitMQ opt-in via amqp compose profile in yggdrasil init
-```
-
 ## Validation
 
 ```bash
