@@ -109,3 +109,22 @@ go test ./...
 - Catalog install (incl. OCI refs) → `internal/integrations/`
 - `yggdrasil new integration` scaffolder → `internal/scaffoldcli/`
   (clones `dakasa-yggdrasil/integration-template`, rewrites module paths)
+
+## Docs freshness (AI-reconciled, stamp-gated) — mandatory
+
+**Before you open a PR or merge, update every doc your change makes stale.** If you touched an
+integration contract, an op signature, a capability, a surface, an event, or any behavior a doc
+describes, the matching doc under `docs/` (ADRs, contracts, the map) and any affected README or
+doc-comment must move in the same change. A doc that still describes the old behavior is a false
+witness the next reader trusts.
+
+**Prove it with the stamp.** Each docs tree carries `docs/AI_DOCS_FRESHNESS.md` with
+`verified_at_commit` (the commit an AI or agent-assisted human last reconciled those docs at).
+When you reconcile the docs, bump that field to your branch tip. On arrival, if the stamp is
+behind the code you are about to touch, reconcile those docs FIRST, before trusting them.
+
+**CI is the safety net.** `.github/workflows/docs-freshness.yml` runs on every PR: a cheap gate
+checks whether real code changed and the stamp was NOT bumped; only then does an AI reconcile
+the stale docs, commit ONLY the doc files back to the PR branch, and bump the stamp. If your
+agent already reconciled and stamped, the gate skips the AI (the economy path). The reconciler
+never weakens a doc to match a bug and never touches source.
