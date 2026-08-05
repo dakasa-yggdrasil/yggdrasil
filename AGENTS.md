@@ -45,3 +45,22 @@ durable decision, record that as an ADR; the handoff itself is disposable.
 against the current-status ADR and the code before asserting it as fact.
 
 **Context files are durable-only (freshness discipline).** `CLAUDE.md` and `AGENTS.md` hold only current-state, durable instructions and policies — things expected to stay true. They MUST NOT accumulate time-bound content: no "recent work" or session-log sections, no dated phase/deploy status, no commit SHAs cited as progress, no machine-specific absolute paths. That content rots inside a durable file. Route a lasting decision to an ADR (`docs/adr/`, immutable, point-in-time); route transient status to gitignored `docs/superpowers/` scratch. Enforced in CI by `.github/workflows/context-freshness.yml` (fails on reintroduced time-bound sections and on structurally-broken ADRs).
+
+## Docs freshness (AI-reconciled, stamp-gated) — mandatory
+
+**Before you open a PR or merge, update every doc your change makes stale.** If you touched an
+integration contract, an op signature, a capability, a surface, an event, or any behavior a doc
+describes, the matching doc under `docs/` (ADRs, contracts, the map) and any affected README or
+doc-comment must move in the same change. A doc that still describes the old behavior is a false
+witness the next reader trusts.
+
+**Prove it with the stamp.** Each docs tree carries `docs/AI_DOCS_FRESHNESS.md` with
+`verified_at_commit` (the commit an AI or agent-assisted human last reconciled those docs at).
+When you reconcile the docs, bump that field to your branch tip. On arrival, if the stamp is
+behind the code you are about to touch, reconcile those docs FIRST, before trusting them.
+
+**CI is the safety net.** `.github/workflows/docs-freshness.yml` runs on every PR: a cheap gate
+checks whether real code changed and the stamp was NOT bumped; only then does an AI reconcile
+the stale docs, commit ONLY the doc files back to the PR branch, and bump the stamp. If your
+agent already reconciled and stamped, the gate skips the AI (the economy path). The reconciler
+never weakens a doc to match a bug and never touches source.
