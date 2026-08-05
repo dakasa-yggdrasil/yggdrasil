@@ -64,3 +64,9 @@ checks whether real code changed and the stamp was NOT bumped; only then does an
 the stale docs, commit ONLY the doc files back to the PR branch, and bump the stamp. If your
 agent already reconciled and stamped, the gate skips the AI (the economy path). The reconciler
 never weakens a doc to match a bug and never touches source.
+
+**Prose docs carry a human-feel layer.** Machine-precise docs (service contracts, schemas, the
+freshness stamp) come first, but whenever you write or update a PROSE doc (a README, an ADR, an
+architecture narrative, a runbook, a connectivity view), make it legible at a glance: a mermaid
+diagram for anything with a flow, a graph, or a sequence; real markdown tables, never ASCII art;
+short sections over walls of text. IA first, human feel beside it.
