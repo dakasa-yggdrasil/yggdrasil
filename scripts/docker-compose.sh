@@ -11,27 +11,26 @@ args=(
   -f "$ROOT/services/yggdrasil-core/docker-compose.yml"
 )
 
-integration_files=()
-
-while IFS= read -r file; do
-  [[ -z "$file" ]] && continue
-  [[ -f "$file" ]] || continue
+add_compose_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return
   args+=(-f "$file")
-  integration_files+=("$file")
-done < <("$ROOT/scripts/ygg.sh" surfaces installed)
 
-while IFS= read -r file; do
-  [[ -z "$file" ]] && continue
-  [[ -f "$file" ]] || continue
-  args+=(-f "$file")
-  integration_files+=("$file")
-done < <(find "$ROOT/integrations" -mindepth 2 -maxdepth 2 -name 'docker-compose.yml' -type f | sort)
-
-for file in "${integration_files[@]}"; do
+  local repo_name prefix
   repo_name="$(basename "$(dirname "$file")")"
   prefix="$(printf '%s' "$repo_name" | tr '[:lower:]-' '[:upper:]_')"
-  export "${prefix}_BUILD_CONTEXT=$ROOT/integrations/${repo_name}"
+  export "${prefix}_BUILD_CONTEXT=$ROOT/$(dirname "${file#"$ROOT/"}")"
   export "${prefix}_DOCKERFILE=Dockerfile"
-done
+}
+
+while IFS= read -r file; do
+  [[ -z "$file" ]] && continue
+  add_compose_file "$file"
+done < <("$ROOT/scripts/yggdrasil.sh" surfaces installed)
+
+while IFS= read -r file; do
+  [[ -z "$file" ]] && continue
+  add_compose_file "$file"
+done < <(find "$ROOT/integrations" -mindepth 2 -maxdepth 2 -name 'docker-compose.yml' -type f | sort)
 
 exec docker compose "${args[@]}" "$@"

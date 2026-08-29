@@ -220,12 +220,12 @@ for entry in "${catalog_integrations[@]}"; do
   test "$actual_url" = "$repo_url"
 done
 
-./scripts/ygg.sh surfaces installed | grep -q 'surfaces/yggdrasil-auth-surface/docker-compose.yml'
-./scripts/ygg.sh surfaces installed | grep -q 'surfaces/yggdrasil-console/docker-compose.yml'
+./scripts/yggdrasil.sh surfaces installed | grep -q 'surfaces/yggdrasil-auth-surface/docker-compose.yml'
+./scripts/yggdrasil.sh surfaces installed | grep -q 'surfaces/yggdrasil-console/docker-compose.yml'
 
 for entry in "${catalog_integrations[@]}"; do
   IFS='|' read -r _ repo_name _ <<<"$entry"
-  ./scripts/ygg.sh integrations installed | grep -q "integrations/${repo_name}/docker-compose.yml"
+  ./scripts/yggdrasil.sh integrations installed | grep -q "integrations/${repo_name}/docker-compose.yml"
 done
 
 echo "Validating compose in isolated workspace..."
