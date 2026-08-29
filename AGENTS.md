@@ -10,6 +10,14 @@ This repository is the Yggdrasil product monorepo. `yggdrasil-core` is the heart
 - If a change affects runtime contracts, update docs, tests, bootstrap data, and the console flow in the same pass.
 - Integrations are optional runtime components, not domain owners.
 
+## Feature-linked deep audits
+
+For a deep audit, exhaustive sweep, or production-readiness review, work on one complete feature root at a time. Expand it as a linked tree from every entry point through components, state, contracts, transports, persistence, workflows, integrations, external effects, observability, retries, and cleanup. Close the feature with evidence and validation, store a compact evidence capsule, release its detailed context, and only then select the next feature. Audit shared nodes once and reopen every dependent feature if a shared-node change invalidates earlier evidence.
+
+Repository authority is a hard boundary. Discovery may identify an external edge, but a repository-scoped collaborator must stop there: do not inspect the external implementation deeply, edit it, or claim it works. Write a concrete Definition of Done for the owning repository/team with producer evidence, expected consumer contract, reproduction, acceptance criteria, compatibility constraints, required tests, and closure evidence. Cross-repository traversal is allowed only when the user explicitly grants aggregator/workspace scope. An explicitly authorized `dakasa-system` audit may traverse the full DaKasa and Yggdrasil universe, while still obeying each repository's nearest policies and ownership contracts.
+
+The full procedure and completion contract are in `docs/feature-linked-deep-audit.md`. Never call a broad audit complete from a repository list, route inventory, mocked unit suite, or truncated output alone; completion requires feature inventory coverage, edge-by-edge evidence, and explicit blocked or skipped nodes.
+
 ## Mandatory validation
 - `task arch:check`
 - `task config`
