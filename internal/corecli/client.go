@@ -14,7 +14,7 @@ import (
 
 // Client is the shared HTTP client used by login/apply/get/describe/
 // logs/status to talk to a yggdrasil-core. It centralizes bearer auth,
-// Accept/Content-Type headers, and error-body decoding so subcommands
+// session CSRF protection, Accept/Content-Type headers, and error-body decoding so subcommands
 // do not re-implement those details.
 type Client struct {
 	BaseURL    string
@@ -73,10 +73,11 @@ func (e *APIError) Error() string {
 // Do executes the request and unmarshals the response body into out
 // (when non-nil). Non-2xx responses become *APIError.
 func (c *Client) Do(ctx context.Context, method, path string, body any, out any) error {
-	if c.BaseURL == "" {
+	baseURL, token := c.BaseURL, c.Token
+	if baseURL == "" {
 		return fmt.Errorf("server URL is required")
 	}
-	target := c.BaseURL + path
+	target := baseURL + path
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -93,14 +94,34 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := c.HTTPClient.Do(req)
+	httpClient := c.HTTPClient
+	sessionMutation := needsSessionCSRF(method, token)
+	if sessionMutation {
+		// Do not forward session/CSRF credentials or replay a mutation through
+		// redirects. Copy the client so other requests keep their own policy.
+		sessionClient := *httpClient
+		sessionClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		sessionClient.Jar = nil // This protocol uses the explicit bearer, not ambient cookies.
+		httpClient = &sessionClient
+		csrfToken, err := readSessionCSRF(ctx, httpClient, baseURL, token)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("X-CSRF-Token", csrfToken)
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("call %s %s: %w", method, target, err)
 	}
 	defer resp.Body.Close()
+	if sessionMutation && resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return &APIError{Status: resp.StatusCode, Detail: "session-authenticated writes do not follow redirects; configure the canonical server URL"}
+	}
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
