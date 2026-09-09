@@ -73,6 +73,34 @@ You rarely edit this file by hand. `init` creates a context (`local` by default,
 or host-derived when `--server` is used); `login` creates/refreshes any named
 context and makes it current.
 
+### Session writes and CSRF
+
+For an opaque human-session bearer (`ys_...`), each `POST`, `PUT`, `PATCH`, or
+`DELETE` first reads `GET /api/v1/auth/session` using the same bearer and server.
+The CLI requires `authenticated: true` and `csrf_token`, then sends that token
+as `X-CSRF-Token` on the write. Core still authenticates and authorizes the action.
+
+```mermaid
+sequenceDiagram
+  participant CLI
+  participant Core
+  CLI->>Core: GET /api/v1/auth/session (session bearer)
+  Core-->>CLI: authenticated + csrf_token
+  CLI->>Core: Mutation (same bearer + X-CSRF-Token)
+  Core-->>CLI: Authorized result or rejection
+```
+
+The CSRF value stays in memory for that request; it is not saved in the config,
+read from browser cookies, or included in session-lookup errors. A missing,
+expired, malformed, or unavailable session stops the write before it is sent.
+An expired session requires `yggdrasil login` again; existing valid contexts
+need no migration. Reads, anonymous login, JWTs, and machine credentials keep
+their existing behavior.
+
+Session lookup and the protected write do not follow redirects or use ambient
+HTTP cookies. Configure the canonical Core URL instead. The CLI does not
+automatically replay a rejected write; server CSRF enforcement stays enabled.
+
 ---
 
 ## Environment variables (read by the CLI)

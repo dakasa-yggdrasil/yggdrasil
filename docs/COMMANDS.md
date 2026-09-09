@@ -89,13 +89,18 @@ yggdrasil login --server <url> --username <slug> [--password <value>]
 | Flag | Default | Description |
 |---|---|---|
 | `--server <url>` | _(prompt)_ | Core base URL (e.g. `http://localhost:9080`). |
-| `--username <slug>` | _(prompt)_ | Login identifier (collaborator slug). |
+| `--username <slug-or-email>` | _(prompt)_ | Login identifier (collaborator slug or email). |
 | `--password <value>` | _(prompt, hidden)_ | Password. Omit to be prompted. |
+| `--totp <code>` | _(prompt when MFA required)_ | Authenticator code for MFA. Prefer interactive entry. |
+| `--recovery-code <code>` | _(unset)_ | Recovery code instead of TOTP. |
 | `--context <name>` | _(derived from host)_ | Context name to store under. |
 | `--non-interactive` | `false` | Fail instead of prompting for missing values. |
 
 Missing `--server` / `--username` / `--password` are prompted interactively
 unless `--non-interactive` is set, in which case they are required.
+Accounts requiring MFA must also complete the second factor. Later writes use
+the saved session with the [CSRF protocol](CONFIGURATION.md#session-writes-and-csrf);
+no browser-cookie export or CSRF configuration is required.
 
 ---
 

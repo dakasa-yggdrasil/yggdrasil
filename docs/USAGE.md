@@ -147,6 +147,12 @@ This calls `POST /api/v1/auth/login`, stores the returned session token under a
 context (named with `--context`, or derived from the host), and makes it
 current. Add `--non-interactive` in CI and pass `--password` explicitly.
 
+When the account requires MFA, interactive login also prompts for its TOTP code.
+`--totp` or `--recovery-code` can supply a second factor when needed; prefer
+interactive prompts to avoid putting credentials in shell history. The saved
+human session automatically uses the [CSRF write protocol](CONFIGURATION.md#session-writes-and-csrf)
+for subsequent changes, without browser cookies or an additional login.
+
 ---
 
 ## 5. Install an integration — `yggdrasil install`
