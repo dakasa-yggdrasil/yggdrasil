@@ -43,6 +43,15 @@ services:
     image: ${YGGDRASIL_CORE_IMAGE:-ghcr.io/dakasa-yggdrasil/yggdrasil-core:latest}
     restart: unless-stopped
     environment:
+      # This stack is a local development environment and says so
+      # explicitly. Core allows credential-free machine calls (workflow
+      # dispatch, manifest writes, event publishes) only while no machine
+      # principal is configured and YGGDRASIL_ENV names a development
+      # environment (dev, development, local or test). Since
+      # yggdrasil-core ADR-0022 an unset value no longer counts as
+      # development. `production` or `prod` turns on Core's boot gate,
+      # which needs secrets this stack does not generate.
+      YGGDRASIL_ENV: ${YGGDRASIL_ENV:-development}
       PORT: "9080"
       DB_HOST: postgres
       DB_PORT: "5432"
