@@ -51,6 +51,8 @@ Notable test files you'll touch when changing behavior:
 - `internal/quickstartcli/quickstartcli_test.go`, `oci_test.go` — install flow + OCI refs.
 - `internal/scaffoldcli/scaffold_test.go` — `yggdrasil new`.
 - `internal/initcli/initcli_test.go`, `seeds_test.go` — bootstrap + topology seeds.
+- `internal/initcli/assets_test.go`: the written compose file and `.env` keep
+  the core on an explicit development `YGGDRASIL_ENV`.
 
 ---
 

@@ -71,8 +71,10 @@ yggdrasil init --server <url>        # attach to an existing core (skips compose
 | `--yes` | `false` | Skip confirmation prompts. |
 
 Standalone mode requires `docker` + the compose v2 plugin. It starts Postgres,
-the core, and the `integration-kubernetes` + `integration-schema-migrations`
-adapters; RabbitMQ is opt-in (`amqp` profile). It then logs in, saves a context,
+the core (explicitly in the `development` posture, see
+[CONFIGURATION.md](CONFIGURATION.md#runtime-posture-yggdrasil_env)), and the
+`integration-kubernetes` + `integration-schema-migrations` adapters; RabbitMQ
+is opt-in (`amqp` profile). It then logs in, saves a context,
 and seeds two `integration_instance` manifests in namespace `global`.
 
 ---

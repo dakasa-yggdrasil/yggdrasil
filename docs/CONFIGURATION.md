@@ -170,6 +170,7 @@ in at write time.
 | `.env` key | Default | Notes |
 |---|---|---|
 | `YGGDRASIL_CORE_IMAGE` | from `--core-image` | yggdrasil-core image pin. |
+| `YGGDRASIL_ENV` | `development` | Runtime posture of the core. Keep it: see [Runtime posture](#runtime-posture-yggdrasil_env). |
 | `CORE_HTTP_PORT` | from `--port` (9080) | Host port mapped to the core. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `yggdrasil` / random / `yggdrasil` | Database credentials. |
 | `AUTH_SESSION_TTL_HOURS` | `720` | Session lifetime. |
@@ -182,6 +183,41 @@ in at write time.
 
 This file holds the bootstrap admin password and DB credentials — store it with
 your other secrets.
+
+### Runtime posture (`YGGDRASIL_ENV`)
+
+The generated stack is a local development environment, and it says so
+explicitly. The compose file passes `YGGDRASIL_ENV: ${YGGDRASIL_ENV:-development}`
+to `yggdrasil-core`, and the `.env` sets `YGGDRASIL_ENV=development`. The `.env`
+line is the knob. When the `.env` lacks the key or leaves it blank, the compose
+default still resolves to `development`.
+
+Core decides from this value whether machine calls may arrive without a
+credential. That covers workflow dispatch, manifest writes and event
+publishes, and applies only while no machine principal is configured. The
+admin session that `init` itself logs in with is not affected.
+
+| `YGGDRASIL_ENV` | Credential-free machine calls | Boot gate |
+|---|---|---|
+| `development` (also `dev`, `local`, `test`) | Allowed while no machine principal is configured | Off |
+| unset, or any other value | Refused with `401` on a Core that carries yggdrasil-core ADR-0022 | Off |
+| `production` or `prod` | Refused | On: Core refuses to boot without secrets this stack does not generate |
+
+Older Cores treat every value except `production` and `prod` as development, so
+the explicit value changes nothing there. It is what keeps the stack working
+once the image moves to a Core that carries ADR-0022.
+
+**A directory written by an older `init`.** Its `docker-compose.yml` does not
+pass `YGGDRASIL_ENV`. Before you pull a newer `yggdrasil-core` image into it,
+add the line `YGGDRASIL_ENV: ${YGGDRASIL_ENV:-development}` to the
+`yggdrasil-core` service `environment` and `YGGDRASIL_ENV=development` to its
+`.env`, then run `docker compose up -d`. Re-running `init` into the same
+directory also writes both files, but it generates a new Postgres password
+that the existing data volume does not know.
+
+A `YGGDRASIL_ENV` exported in the shell that runs `docker compose` (or
+`yggdrasil init`) wins over the `.env` value, as for every other variable in
+this file.
 
 ### AMQP (RabbitMQ) opt-in
 
