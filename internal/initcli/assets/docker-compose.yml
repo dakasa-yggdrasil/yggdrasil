@@ -45,21 +45,20 @@ services:
     environment:
       # This stack is a local development environment and says so
       # explicitly. Core allows credential-free workflow dispatch,
-      # manifest writes and event publishes only while no machine
-      # principal is configured and YGGDRASIL_ENV names a development
-      # environment (dev, development, local or test). Since
-      # yggdrasil-core ADR-0022 an unset value no longer counts as
-      # development. Set YGGDRASIL_ENV in .env to anything else (for
-      # example "staging") to keep those calls closed on a host other
-      # people can reach, and set YGGDRASIL_DEPLOY_TOKEN there as well:
-      # YGGDRASIL_ENV does not close the deploy, bootstrap and
-      # integration-install routes. `production` or `prod` turns on
-      # Core's boot gate, which needs secrets this stack does not
-      # generate.
+      # event publishes, deploy, bootstrap and integration install only
+      # while no matching credential is configured and YGGDRASIL_ENV
+      # names a development environment (dev, development, local or
+      # test). Since yggdrasil-core ADR-0022 an unset value no longer
+      # counts as development. Set YGGDRASIL_ENV in .env to anything
+      # else (for example "staging") to close those calls on a host
+      # other people can reach, and set YGGDRASIL_DEPLOY_TOKEN there to
+      # keep using the deploy-family routes. `production` or `prod`
+      # turns on Core's boot gate, which needs secrets this stack does
+      # not generate.
       YGGDRASIL_ENV: ${YGGDRASIL_ENV:-development}
       # Dedicated bearer for the deploy, bootstrap and integration-install
-      # routes. Empty (the default) keeps those routes credential-free for
-      # every YGGDRASIL_ENV except production and prod.
+      # routes. Empty (the default) keeps those routes credential-free
+      # while YGGDRASIL_ENV is a development value.
       YGGDRASIL_DEPLOY_TOKEN: ${YGGDRASIL_DEPLOY_TOKEN:-}
       PORT: "9080"
       DB_HOST: postgres

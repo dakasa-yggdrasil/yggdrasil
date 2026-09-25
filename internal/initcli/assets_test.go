@@ -11,10 +11,10 @@ import (
 )
 
 // initStackEnv is the YGGDRASIL_ENV value the init stack declares. Core
-// allows credential-free machine calls (workflow dispatch, manifest writes,
-// event publishes) only while YGGDRASIL_ENV names a development environment
-// explicitly (yggdrasil-core ADR-0022), so a stack that loses this value
-// answers 401 to those calls once it runs such a Core.
+// allows credential-free machine calls (workflow dispatch, event publishes,
+// deploy, bootstrap and integration install) only while YGGDRASIL_ENV names
+// a development environment explicitly (yggdrasil-core ADR-0022), so a stack
+// that loses this value answers 401 to those calls once it runs such a Core.
 const initStackEnv = "development"
 
 // coreDevelopmentEnvs mirrors the values Core's machineAnonymousAllowed
