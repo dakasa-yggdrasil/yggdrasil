@@ -43,6 +43,23 @@ services:
     image: ${YGGDRASIL_CORE_IMAGE:-ghcr.io/dakasa-yggdrasil/yggdrasil-core:latest}
     restart: unless-stopped
     environment:
+      # This stack is a local development environment and says so
+      # explicitly. Core allows credential-free workflow dispatch,
+      # event publishes, deploy, bootstrap and integration install only
+      # while no matching credential is configured and YGGDRASIL_ENV
+      # names a development environment (dev, development, local or
+      # test). Since yggdrasil-core ADR-0022 an unset value no longer
+      # counts as development. Set YGGDRASIL_ENV in .env to anything
+      # else (for example "staging") to close those calls on a host
+      # other people can reach, and set YGGDRASIL_DEPLOY_TOKEN there to
+      # keep using the deploy-family routes. `production` or `prod`
+      # turns on Core's boot gate, which needs secrets this stack does
+      # not generate.
+      YGGDRASIL_ENV: ${YGGDRASIL_ENV:-development}
+      # Dedicated bearer for the deploy, bootstrap and integration-install
+      # routes. Empty (the default) keeps those routes credential-free
+      # while YGGDRASIL_ENV is a development value.
+      YGGDRASIL_DEPLOY_TOKEN: ${YGGDRASIL_DEPLOY_TOKEN:-}
       PORT: "9080"
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -64,13 +81,15 @@ services:
       YGGDRASIL_BOOTSTRAP_ADMIN_EMAIL: ${YGGDRASIL_BOOTSTRAP_ADMIN_EMAIL:-}
       YGGDRASIL_BOOTSTRAP_ADMIN_DISPLAY_NAME: ${YGGDRASIL_BOOTSTRAP_ADMIN_DISPLAY_NAME:-Admin}
       YGGDRASIL_BOOTSTRAP_MANIFESTS_PATH: /app/docs/bootstrap/seeds
+    # Published on every host interface. Read the YGGDRASIL_ENV note
+    # above before you run this stack on a host other people can reach.
     ports:
       - "${CORE_HTTP_PORT:-9080}:9080"
     depends_on:
       postgres:
         condition: service_healthy
 
-  # Kubernetes adapter — consumed by workflows that apply K8s objects
+  # Kubernetes adapter, consumed by workflows that apply K8s objects
   # in an adopter's cluster (e.g. yggdrasil-deploy-control-plane).
   # Needs a kubeconfig mounted; KUBECONFIG_PATH defaults to the
   # caller's ~/.kube/config.
@@ -86,7 +105,7 @@ services:
 
   # Schema-migrations adapter (goose-postgres provider). Used by
   # workflows that apply versioned SQL migrations against a target
-  # Postgres — including the core's own self-migration path.
+  # Postgres, including the core's own self-migration path.
   integration-schema-migrations:
     image: ${INTEGRATION_SCHEMA_MIGRATIONS_IMAGE:-ghcr.io/dakasa-yggdrasil/integration-schema-migrations:latest}
     restart: unless-stopped

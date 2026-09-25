@@ -170,6 +170,8 @@ in at write time.
 | `.env` key | Default | Notes |
 |---|---|---|
 | `YGGDRASIL_CORE_IMAGE` | from `--core-image` | yggdrasil-core image pin. |
+| `YGGDRASIL_ENV` | `development` | Runtime posture of the core. Keep it on a machine only you can reach; change it on any other host. See [Runtime posture](#runtime-posture-yggdrasil_env). |
+| `YGGDRASIL_DEPLOY_TOKEN` | _(commented out)_ | Bearer for the deploy, bootstrap and integration-install routes. Set it on a host other people can reach. See [Runtime posture](#runtime-posture-yggdrasil_env). |
 | `CORE_HTTP_PORT` | from `--port` (9080) | Host port mapped to the core. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `yggdrasil` / random / `yggdrasil` | Database credentials. |
 | `AUTH_SESSION_TTL_HOURS` | `720` | Session lifetime. |
@@ -182,6 +184,78 @@ in at write time.
 
 This file holds the bootstrap admin password and DB credentials — store it with
 your other secrets.
+
+### Runtime posture (`YGGDRASIL_ENV`)
+
+The generated stack is a local development environment, and it says so
+explicitly. The compose file passes `YGGDRASIL_ENV: ${YGGDRASIL_ENV:-development}`
+to `yggdrasil-core`, and the `.env` sets `YGGDRASIL_ENV=development`. The `.env`
+line is the knob. When the `.env` lacks the key or leaves it blank, the compose
+default still resolves to `development`.
+
+Core reads this value to decide which machine calls may arrive with no
+credential. Two groups of routes follow different rules, and neither group
+covers the admin session that `init` itself logs in with:
+
+- **Workflow dispatch and event publishes** are credential-free only while no
+  machine principal is configured.
+- **Deploy, bootstrap and integration install** (`POST /api/v1/bootstrap`,
+  `/api/v1/integrations/install`, `/api/v1/products/deploy-all`,
+  `/api/v1/products/{namespace}/{name}/deploy`, and the same routes under
+  `/api/v1/console/`) are credential-free only while `YGGDRASIL_DEPLOY_TOKEN`
+  is unset.
+
+On a Core that carries yggdrasil-core ADR-0022, both groups also need
+`YGGDRASIL_ENV` to name a development environment. Manifest writes always need
+a console session, whatever the value.
+
+On a Core that carries yggdrasil-core ADR-0022:
+
+| `YGGDRASIL_ENV` | Workflow dispatch, event publishes with no credential | Deploy, bootstrap, integration install with no credential | Boot gate |
+|---|---|---|---|
+| `development` (also `dev`, `local`, `test`) | Allowed while no machine principal is configured | Allowed while `YGGDRASIL_DEPLOY_TOKEN` is unset | Off |
+| unset, or any other value (for example `staging`) | Refused with `401` | Refused with `401` | Off |
+| `production` or `prod` | Refused | Refused | On: Core refuses to boot without secrets this stack does not generate |
+
+An older Core treats every value except `production` and `prod` as
+development, and keeps the deploy-family routes credential-free until
+`YGGDRASIL_DEPLOY_TOKEN` is set, so the explicit value changes nothing
+there. It is what keeps the stack working once the image moves to a Core that
+carries ADR-0022.
+
+**On a host other people can reach.** The compose file publishes the core on
+every interface of the host (the `CORE_HTTP_PORT` mapping has no host IP), and
+`integration-kubernetes` runs with your kubeconfig. A credential-free caller
+that can reach the port can dispatch workflows and install integrations
+against your cluster. Keep `development` only on a machine nobody else can reach. Anywhere
+else, set both of these in `.env`, then run `docker compose up -d`:
+
+1. `YGGDRASIL_ENV` to a value outside the development list, for example
+   `staging`. On a Core that carries ADR-0022 this closes every
+   credential-free route above.
+2. `YGGDRASIL_DEPLOY_TOKEN` to a long random value (uncomment the line the
+   `.env` already carries). This is how you keep using the deploy, bootstrap
+   and integration-install routes, and on an older Core it is what closes
+   them. Callers then send it as
+   `Authorization: Bearer <token>` or `X-Deploy-Token: <token>`; for
+   `yggdrasil install`, pass it with `--token`.
+
+On an older Core, step 1 closes nothing and step 2 closes only the
+deploy-family routes, so keep its port on a network only you can reach.
+
+**A directory written by an older `init`.** Its `docker-compose.yml` does not
+pass `YGGDRASIL_ENV`. Before you pull a newer `yggdrasil-core` image into it,
+add the line `YGGDRASIL_ENV: ${YGGDRASIL_ENV:-development}` to the
+`yggdrasil-core` service `environment` and `YGGDRASIL_ENV=development` to its
+`.env`, then run `docker compose up -d`. To use the deploy token there, also
+add `YGGDRASIL_DEPLOY_TOKEN: ${YGGDRASIL_DEPLOY_TOKEN:-}` to the same
+`environment`. Re-running `init` into the same directory also writes both
+files, but it generates a new Postgres password that the existing data volume
+does not know.
+
+A `YGGDRASIL_ENV` exported in the shell that runs `docker compose` (or
+`yggdrasil init`) wins over the `.env` value, as for every other variable in
+this file.
 
 ### AMQP (RabbitMQ) opt-in
 
