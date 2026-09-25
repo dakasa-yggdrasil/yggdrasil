@@ -174,6 +174,23 @@ func TestInitStackDotenvDrivesCoreEnv(t *testing.T) {
 	}
 }
 
+// TestInitStackForwardsDeployToken proves YGGDRASIL_DEPLOY_TOKEN is an
+// operator knob in .env: compose forwards it to yggdrasil-core, and the
+// rendered .env leaves it empty so the default stack behaves as before.
+func TestInitStackForwardsDeployToken(t *testing.T) {
+	dir := renderInitAssets(t)
+	raw, ok := coreComposeEnv(t, dir)["YGGDRASIL_DEPLOY_TOKEN"]
+	if !ok {
+		t.Fatal("yggdrasil-core environment does not forward YGGDRASIL_DEPLOY_TOKEN; the .env knob would never reach Core")
+	}
+	if got := resolveComposeValue(t, raw, dotenvEntries(t, dir)); got != "" {
+		t.Fatalf("rendered stack sets YGGDRASIL_DEPLOY_TOKEN to %q, want it empty by default", got)
+	}
+	if got := resolveComposeValue(t, raw, map[string]string{"YGGDRASIL_DEPLOY_TOKEN": "operator-value"}); got != "operator-value" {
+		t.Fatalf("yggdrasil-core YGGDRASIL_DEPLOY_TOKEN ignores the .env value: got %q", got)
+	}
+}
+
 func TestResolveComposeValue(t *testing.T) {
 	cases := []struct {
 		raw    string

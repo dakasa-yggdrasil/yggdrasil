@@ -52,6 +52,10 @@ services:
       # development. `production` or `prod` turns on Core's boot gate,
       # which needs secrets this stack does not generate.
       YGGDRASIL_ENV: ${YGGDRASIL_ENV:-development}
+      # Dedicated bearer for the deploy, bootstrap and integration-install
+      # routes. Empty (the default) keeps those routes credential-free for
+      # every YGGDRASIL_ENV except production and prod.
+      YGGDRASIL_DEPLOY_TOKEN: ${YGGDRASIL_DEPLOY_TOKEN:-}
       PORT: "9080"
       DB_HOST: postgres
       DB_PORT: "5432"
