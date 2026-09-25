@@ -48,7 +48,9 @@ Requirements: `docker` on `PATH` and the **compose v2** plugin
 - **Postgres** (data persisted in a named volume).
 - **yggdrasil-core** on host port `9080`, with `YGGDRASIL_ENV=development`
   set explicitly: the stack is a local development environment, never
-  production. See
+  production. The port is published on every host interface, so on a host
+  other people can reach, set `YGGDRASIL_ENV` to another value (for example
+  `staging`) and set `YGGDRASIL_DEPLOY_TOKEN` in `.env`. See
   [CONFIGURATION.md](CONFIGURATION.md#runtime-posture-yggdrasil_env).
 - **integration-kubernetes** adapter (HTTP transport, needs a kubeconfig — it
   mounts `~/.kube/config` read-only by default).

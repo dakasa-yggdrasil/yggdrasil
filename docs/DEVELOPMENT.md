@@ -52,7 +52,8 @@ Notable test files you'll touch when changing behavior:
 - `internal/scaffoldcli/scaffold_test.go` — `yggdrasil new`.
 - `internal/initcli/initcli_test.go`, `seeds_test.go` — bootstrap + topology seeds.
 - `internal/initcli/assets_test.go`: the written compose file and `.env` keep
-  the core on an explicit development `YGGDRASIL_ENV`.
+  the core on an explicit development `YGGDRASIL_ENV` and forward an empty
+  `YGGDRASIL_DEPLOY_TOKEN` the operator can fill.
 
 ---
 
