@@ -133,3 +133,31 @@ func (c *Client) RunWorkflowMode(ctx context.Context, namespace, name string, in
 	}
 	return result, nil
 }
+
+// WorkflowSelector mirrors Core's existing manifest selector wire contract.
+// A namespace/name/version selector preserves active-version checks; selecting
+// by manifest ID has the server's separate explicit-ID semantics.
+type WorkflowSelector struct {
+	ManifestID string `json:"manifest_id,omitempty"`
+	Namespace  string `json:"namespace,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Version    *int   `json:"version,omitempty"`
+}
+
+// RunWorkflowSelectorMode dispatches an existing immutable manifest selection.
+// It adds no server endpoint and leaves RunWorkflowMode's ordinary path intact.
+func (c *Client) RunWorkflowSelectorMode(ctx context.Context, selector WorkflowSelector, inputs map[string]any, async bool) (WorkflowRunResult, error) {
+	path := "/api/v1/workflow-runs"
+	if async {
+		path += "?async=true"
+	}
+	payload := map[string]any{"workflow": selector}
+	if inputs != nil {
+		payload["inputs"] = inputs
+	}
+	var result WorkflowRunResult
+	if err := c.Do(ctx, http.MethodPost, path, payload, &result); err != nil {
+		return WorkflowRunResult{}, err
+	}
+	return result, nil
+}

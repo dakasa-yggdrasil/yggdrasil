@@ -14,7 +14,7 @@ import (
 // (e.g. --input k=v --input k2=v2).
 type repeatedString []string
 
-func (r *repeatedString) String() string  { return strings.Join(*r, ",") }
+func (r *repeatedString) String() string     { return strings.Join(*r, ",") }
 func (r *repeatedString) Set(v string) error { *r = append(*r, v); return nil }
 
 // parseInputPairs turns ["k=v", ...] into a map. Values are kept as
@@ -36,11 +36,17 @@ func parseInputPairs(pairs []string) (map[string]any, error) {
 // workflow run by name. Sync by default (prints per-step progress);
 // --async returns a run id immediately for `yggdrasil logs`/`ops get`.
 func runRun(args []string) error {
+	return runRunWithPrivateIO(args, terminalPrivateInputIO())
+}
+
+func runRunWithPrivateIO(args []string, privateIO privateInputIO) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	namespace := fs.String("namespace", "global", "workflow namespace")
 	fs.StringVar(namespace, "n", "global", "short for --namespace")
 	var inputs repeatedString
 	fs.Var(&inputs, "input", "workflow input as key=value (repeatable)")
+	var privateInputs repeatedString
+	fs.Var(&privateInputs, "input-secret", "private workflow input key; prompt with hidden terminal entry (repeatable, forces async)")
 	async := fs.Bool("async", false, "dispatch asynchronously and return a run id immediately")
 	server := fs.String("server", "", "override the active context's server URL")
 	token := fs.String("token", "", "override the active context's bearer token")
@@ -50,6 +56,7 @@ func runRun(args []string) error {
 Usage:
   yggdrasil run <workflow> [-n <ns>] [--input k=v ...]
   yggdrasil run <workflow> --async        # return a run id, don't block
+  yggdrasil run <workflow> --input-secret <key>  # hidden terminal entry, async
 
 Flags:
 `)
@@ -69,6 +76,10 @@ Flags:
 	if err != nil {
 		return err
 	}
+	privateKeys, err := validatePrivateInputKeys(privateInputs, inputMap)
+	if err != nil {
+		return err
+	}
 
 	client, err := clientFromFlags(*server, *token)
 	if err != nil {
@@ -76,6 +87,9 @@ Flags:
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+	if len(privateKeys) > 0 {
+		return runPrivateWorkflow(ctx, client, *namespace, name, inputMap, privateKeys, privateIO)
+	}
 
 	res, err := client.RunWorkflowMode(ctx, *namespace, name, inputMap, *async)
 	if err != nil {
