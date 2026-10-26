@@ -7,7 +7,11 @@ The docs-freshness CI reads it: a PR that bumps it is trusted and the AI is skip
 Before a PR: update stale docs, set verified_at_commit to your branch tip.
 On arrival: if this is behind the code you touch, reconcile the docs FIRST.
 
-verified_at_commit: c35e14f12c1c46c04fb93031ceef0e5c24bd4b7b
-verified_at: 2026-09-25
-by: Claude
-note: Reconciled the init stack docs (CONFIGURATION, USAGE, DEVELOPMENT) with the explicit development YGGDRASIL_ENV, the forwarded YGGDRASIL_DEPLOY_TOKEN and the reachable-host caveat in the compose and .env assets, and scoped the posture table to the routes each setting governs on a Core with yggdrasil-core ADR-0022. Deploy-family rows follow yggdrasil-core#57: refused unless YGGDRASIL_ENV is a development value; manifest writes are never credential-free.
+verified_at_commit: 71b406793094f362e9eaa9175a6cf3643d4120f5
+verified_at: 2026-10-26
+by: Codex
+note: Reviewed hidden terminal input, exact active workflow schema/version binding, one async dispatch through existing human-session CSRF, fixed private errors and UUID/status-only output. Existing ordinary input behavior and server authority are preserved. Commands and README match the implementation; CI builds an immutable macOS CLI artifact after unit checks. Generated context was refreshed. No secret, live dispatch or local executable validation occurred.
+
+verified_diff_sha256: 796add7e573ceacb82d481f742c59bcb349b4254b74f859b8b0b5ee4ccc5a29f
+
+reconciler_schema: 1
