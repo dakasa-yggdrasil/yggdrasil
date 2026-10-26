@@ -140,3 +140,24 @@ func TestRunWorkflowMode_AsyncSetsQueryAndParsesRunID(t *testing.T) {
 		t.Errorf("workflow name not sent: %+v", fs.last.body)
 	}
 }
+
+func TestRunWorkflowSelectorModePreservesExactExistingVersionContract(t *testing.T) {
+	fs := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusAccepted, map[string]any{"run_id": "run-selector-1", "status": "pending"})
+	})
+	version := 7
+	result, err := fs.client().RunWorkflowSelectorMode(context.Background(), WorkflowSelector{Namespace: "ops", Name: "private-writer", Version: &version}, nil, true)
+	if err != nil || result.RunID != "run-selector-1" {
+		t.Fatal("versioned workflow dispatch failed")
+	}
+	if fs.last.method != http.MethodPost || fs.last.path != "/api/v1/workflow-runs?async=true" {
+		t.Fatal("versioned dispatch must use the existing async endpoint")
+	}
+	selector, ok := fs.last.body["workflow"].(map[string]any)
+	if !ok || selector["namespace"] != "ops" || selector["name"] != "private-writer" || selector["version"] != float64(7) {
+		t.Fatal("versioned dispatch did not preserve the exact selector")
+	}
+	if _, present := selector["manifest_id"]; present {
+		t.Fatal("name/version selector must not bypass active-version resolution")
+	}
+}

@@ -1,0 +1,205 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-10-26T15:30:32-03:00",
+  "primary_language": "go",
+  "languages": {
+    ".go": 73,
+    ".json": 7,
+    ".yaml": 1,
+    ".yml": 13
+  },
+  "provenance": {
+    "commit": "71b406793094f362e9eaa9175a6cf3643d4120f5",
+    "dirty": false,
+    "files": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "62c65e8c662e0515ddeaaf66b0571dac5fd727493fcd7d859cc06392016a620c"
+      },
+      {
+        "path": "CLAUDE.md",
+        "sha256": "c4677fdc7b8165780892539dbfe5c65021325d084f0c9eea65661e78d099be89"
+      },
+      {
+        "path": "README.md",
+        "sha256": "51f683ac9aa60a4d8af135a171477a228d679414ac81d84fd5fd78ceff217dd1"
+      },
+      {
+        "path": "Taskfile.yml",
+        "sha256": "d6fad3c593c71faa4d42f74a94eec8461768816be1916e2d2e553669fd161e98"
+      },
+      {
+        "path": "go.mod",
+        "sha256": "cecd2c47719f46933a215727d1a5ea130436143058173edfb7a4db6e7b3a7d00"
+      }
+    ]
+  },
+  "service": {},
+  "top_dirs": [
+    {
+      "path": "cmd/yggdrasil",
+      "files": 35,
+      "kb": 146
+    },
+    {
+      "path": "internal/corecli",
+      "files": 12,
+      "kb": 77
+    },
+    {
+      "path": "internal/quickstartcli",
+      "files": 10,
+      "kb": 51
+    },
+    {
+      "path": ".github/workflows",
+      "files": 8,
+      "kb": 50
+    },
+    {
+      "path": "internal/initcli",
+      "files": 5,
+      "kb": 29
+    },
+    {
+      "path": "docs/bootstrap-extras/integrations",
+      "files": 4,
+      "kb": 12
+    },
+    {
+      "path": "internal/integrations",
+      "files": 4,
+      "kb": 10
+    },
+    {
+      "path": "templates/surface-go",
+      "files": 4,
+      "kb": 5
+    },
+    {
+      "path": "internal/scaffoldcli",
+      "files": 3,
+      "kb": 17
+    },
+    {
+      "path": "internal/surfaces",
+      "files": 3,
+      "kb": 13
+    },
+    {
+      "path": ".",
+      "files": 2,
+      "kb": 7
+    },
+    {
+      "path": "catalog",
+      "files": 2,
+      "kb": 3
+    }
+  ],
+  "top_files_by_size": [
+    {
+      "path": "internal/corecli/collaborators_test.go",
+      "kb": 16
+    },
+    {
+      "path": "cmd/yggdrasil/run_secret_test.go",
+      "kb": 14
+    },
+    {
+      "path": "cmd/yggdrasil/collaborator.go",
+      "kb": 13
+    },
+    {
+      "path": ".github/workflows/postmortem.yml",
+      "kb": 12
+    },
+    {
+      "path": ".github/workflows/incident-escalation.yml",
+      "kb": 12
+    },
+    {
+      "path": "internal/initcli/initcli.go",
+      "kb": 10
+    },
+    {
+      "path": "internal/quickstartcli/oci.go",
+      "kb": 10
+    },
+    {
+      "path": "internal/corecli/client.go",
+      "kb": 10
+    },
+    {
+      "path": "internal/corecli/session_csrf_test.go",
+      "kb": 10
+    },
+    {
+      "path": "cmd/yggdrasil/main.go",
+      "kb": 10
+    },
+    {
+      "path": "internal/scaffoldcli/scaffold.go",
+      "kb": 10
+    },
+    {
+      "path": "internal/surfaces/manager.go",
+      "kb": 10
+    }
+  ],
+  "contracts": {
+    "openapi": false,
+    "openapi_endpoints_estimated": 0,
+    "event_schemas": 0
+  },
+  "database": {
+    "migrations": 0
+  },
+  "docs": {
+    "glossary": false,
+    "readme": true
+  },
+  "dependencies": {
+    "go_modules": [
+      "github.com/atotto/clipboard v0.1.4 // indirect",
+      "github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect",
+      "github.com/catppuccin/go v0.3.0 // indirect",
+      "github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7 // indirect",
+      "github.com/charmbracelet/bubbletea v1.3.6",
+      "github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect",
+      "github.com/charmbracelet/huh v1.0.0",
+      "github.com/charmbracelet/lipgloss v1.1.0",
+      "github.com/charmbracelet/x/ansi v0.9.3 // indirect",
+      "github.com/charmbracelet/x/cellbuf v0.0.13 // indirect",
+      "github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect",
+      "github.com/charmbracelet/x/term v0.2.1 // indirect",
+      "github.com/dustin/go-humanize v1.0.1 // indirect",
+      "github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect",
+      "github.com/google/go-cmp v0.7.0 // indirect",
+      "github.com/kr/pretty v0.3.1 // indirect",
+      "github.com/lucasb-eyer/go-colorful v1.2.0 // indirect",
+      "github.com/mattn/go-isatty v0.0.20 // indirect",
+      "github.com/mattn/go-localereader v0.0.1 // indirect",
+      "github.com/mattn/go-runewidth v0.0.16 // indirect",
+      "github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect",
+      "github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect",
+      "github.com/muesli/cancelreader v0.2.2 // indirect",
+      "github.com/muesli/termenv v0.16.0 // indirect",
+      "github.com/rivo/uniseg v0.4.7 // indirect",
+      "github.com/rogpeppe/go-internal v1.14.1 // indirect",
+      "github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect",
+      "go.yaml.in/yaml/v2 v2.4.3 // indirect",
+      "go.yaml.in/yaml/v3 v3.0.4 // indirect",
+      "golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect",
+      "golang.org/x/sync v0.20.0 // indirect",
+      "golang.org/x/sys v0.43.0 // indirect",
+      "golang.org/x/text v0.36.0 // indirect",
+      "gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect",
+      "sigs.k8s.io/yaml v1.6.0"
+    ]
+  },
+  "ops": {
+    "config_files": 8,
+    "k8s_manifests": 8
+  }
+}

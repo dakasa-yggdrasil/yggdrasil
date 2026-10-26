@@ -135,7 +135,16 @@ yggdrasil apply -f my-workflow.yaml
 
 # 5. Run it and stream the steps to completion (sync by default).
 yggdrasil run my-workflow -n default --input target=prod
+
+# Private input: only the key is an argument; the terminal hides the value.
+yggdrasil run register-credential -n ops --input-secret credential
 ```
+
+Private workflow inputs require an explicit secret/sensitive string declaration
+in the active workflow schema and terminal input/output. The CLI validates and
+pins that active version before prompting, dispatches once asynchronously, and
+prints only the validated run identifier and status. See the
+[private input contract](docs/COMMANDS.md#private-workflow-inputs).
 
 The full end-to-end journey — install → init → login → apply → get → run → ops/logs —
 is in [docs/USAGE.md](docs/USAGE.md).

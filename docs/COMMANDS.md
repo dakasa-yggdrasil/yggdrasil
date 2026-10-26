@@ -411,12 +411,14 @@ exits non-zero unless the run reaches a success terminal (`succeeded` or
 ```
 yggdrasil run <workflow> [-n <ns>] [--input k=v ...]
 yggdrasil run <workflow> --async        # return a run id, don't block
+yggdrasil run <workflow> --input-secret <key>  # hidden terminal entry; forces async
 ```
 
 | Flag | Default | Description |
 |---|---|---|
 | `-n`, `--namespace <ns>` | `global` | Workflow namespace. |
 | `--input <k=v>` | _(repeatable)_ | A workflow input as `key=value`. Values are sent as strings; the workflow's input schema coerces types server-side. |
+| `--input-secret <key>` | _(repeatable)_ | Prompt for a declared string input marked `secret: true` or `sensitive: true`. Only the key goes in the command line. Requires terminal input/output and forces async dispatch. |
 | `--async` | `false` | Dispatch asynchronously and print the run id immediately instead of streaming. |
 | `--server <url>` | _(context)_ | Override the active context's server URL. |
 | `--token <bearer>` | _(context)_ | Override the active context's bearer token. |
@@ -427,6 +429,53 @@ yggdrasil run deploy-app --async
 # ✓ dispatched global/deploy-app (run <run-id>, status queued)
 #   follow: yggdrasil logs <run-id>   |   yggdrasil ops get <run-id>
 ```
+
+### Private workflow inputs
+
+Use `--input-secret` for private values rather than passing them in shell
+arguments, environment variables or redirected files:
+
+```sh
+yggdrasil run register-credential -n ops --input-secret credential
+# The terminal asks for hidden entry, then prints only:
+# run <run-id>
+# status pending
+```
+
+```mermaid
+sequenceDiagram
+  participant T as Terminal
+  participant C as CLI
+  participant Y as Core
+  C->>Y: GET exact active workflow and input schema
+  C->>T: Hidden input for declared private keys
+  C->>Y: POST one async run pinned to that active version
+  Y-->>C: Run identifier and status
+  C-->>T: Validated identifier and status only
+```
+
+Before prompting, the CLI requires exactly one active workflow matching the
+requested kind, namespace and name, with a valid record identity/version and
+an explicit string property marked `secret` or `sensitive` by boolean `true`.
+Missing declarations, ordinary properties and ambiguous records fail closed.
+The existing namespace/name/version selector pins the exact reviewed version;
+Core's active-version checks still apply if the manifest changes afterward.
+
+All three standard streams must be terminals. Piped input, redirected output,
+duplicate private keys, `key=value` private arguments and keys also supplied
+with `--input` are refused. Cancellation, empty values, surrounding whitespace,
+control characters and values larger than 64 KiB stop before dispatch. The CLI
+holds collected values only in memory for the request and clears its input-map
+entries afterward; it does not write them to configuration, files or environment
+variables. Core retains authority for authorization, validation, execution and
+server-side sensitive-data handling.
+
+Private input always uses async mode, including when `--async=false` is passed.
+It never prints workflow, step or metadata objects, and provider errors use fixed
+public classes. Redirects and implicit mutation retries are refused. An
+unconfirmed POST may already have created a run: inspect existing runs through
+an authenticated read-only GET before deliberately starting another run. This
+mode does not change ordinary `--input` parsing or sync/async behavior.
 
 ---
 
